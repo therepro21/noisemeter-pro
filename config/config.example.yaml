@@ -22,7 +22,7 @@ web:
   host: 0.0.0.0
   port: 8080
   secret_key: change-this-secret-key
-  refresh_seconds: 5           # automatische Aktualisierung der Weboberfläche
+  refresh_seconds: 5           # Intervall für die Live-Pegel-Aktualisierung
 site_name: Strassenseite
 mqtt:
   enabled: false
