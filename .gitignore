@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Messdaten
+recordings/
+logs/
+backups/
+
+# Datenbank
+database/*.db
+
+# Einstellungen
+.env
+
+# Entwicklungsumgebung
+.vscode/
+.idea/
