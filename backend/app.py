@@ -6,6 +6,7 @@ from pathlib import Path
 import logging
 
 from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
+from werkzeug.utils import secure_filename
 
 from .config import load_config, save_config
 from .database import Database
@@ -22,6 +23,8 @@ def period_range(kind: str, value: str):
         year, week = map(int, value.split("-W")); start = date.fromisocalendar(year, week, 1); end = start + timedelta(days=7)
     elif kind == "month":
         start = datetime.strptime(value + "-01", "%Y-%m-%d").date(); end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    elif kind == "year":
+        start = datetime.strptime(value + "-01-01", "%Y-%m-%d").date(); end = start.replace(year=start.year + 1)
     else: raise ValueError("invalid period")
     return start.isoformat(), end.isoformat()
 
@@ -31,6 +34,7 @@ def create_app(config_path: str):
     database = Database(config["storage"]["database"]); monitor = NoiseMonitor(config, database)
     mqtt = MqttPublisher(config["mqtt"], database); monitor.on_measurement = mqtt.publish_measurement
     mqtt.start()
+    app.extensions["mqtt"] = mqtt
     system_info = SystemInfo(config["storage"]["audio_dir"])
     app.extensions["monitor"], app.extensions["database"], app.extensions["nm_config"], app.extensions["config_path"] = monitor, database, config, config_path
 
@@ -40,6 +44,11 @@ def create_app(config_path: str):
     def status(): return jsonify(monitor.status())
     @app.get("/api/system")
     def system_status(): return jsonify(system_info.read())
+    @app.get("/api/event-counts")
+    def event_counts():
+        today = date.today(); week = today - timedelta(days=today.weekday()); month = today.replace(day=1); year = today.replace(month=1, day=1)
+        ranges = {"day": (today, today + timedelta(days=1)), "week": (week, week + timedelta(days=7)), "month": (month, (month.replace(day=28) + timedelta(days=4)).replace(day=1)), "year": (year, year.replace(year=year.year + 1))}
+        return jsonify({name: database.summary(start.isoformat(), end.isoformat())["event_count"] for name, (start, end) in ranges.items()})
     @app.get("/api/events")
     def events():
         kind, value = request.args.get("kind", "day"), request.args.get("date", date.today().isoformat())
@@ -55,7 +64,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps")}, "storage": {"retention_days": config["storage"]["retention_days"]}})
+    def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -103,6 +112,47 @@ def create_app(config_path: str):
         config["audio"]["mp3_bitrate_kbps"] = bitrate
         config["storage"]["retention_days"] = retention
         save_config(config_path, config)
+        return jsonify({"ok": True})
+    @app.put("/api/config/calibration")
+    def set_calibration():
+        payload = request.get_json(force=True) or {}
+        try: manual = float(payload["manual_calibration_db"])
+        except (KeyError, TypeError, ValueError): abort(400, "Ungültige Kalibrierung")
+        if not -30 <= manual <= 30: abort(400, "Manuelle Kalibrierung muss zwischen -30 und 30 dB liegen")
+        config["audio"]["manual_calibration_db"] = manual; save_config(config_path, config)
+        return jsonify({"ok": True})
+    @app.put("/api/config/measurement")
+    def set_measurement():
+        payload = request.get_json(force=True) or {}
+        weighting, response = str(payload.get("weighting", "")).upper(), str(payload.get("time_weighting", "")).lower()
+        if weighting not in ("A", "C") or response not in ("fast", "slow"):
+            abort(400, "Ungültige Messart")
+        config["audio"]["weighting"] = weighting; config["audio"]["time_weighting"] = response
+        monitor.reset_measurement_response(); save_config(config_path, config)
+        return jsonify({"ok": True})
+    @app.post("/api/config/calibration-file")
+    def upload_calibration():
+        uploaded = request.files.get("file")
+        if not uploaded or not uploaded.filename: abort(400, "Keine Kalibrierdatei ausgewählt")
+        filename = secure_filename(uploaded.filename)
+        if Path(filename).suffix.lower() not in (".txt", ".cal", ".csv"): abort(400, "Erlaubt sind TXT, CAL oder CSV")
+        target_dir = Path(config["storage"]["calibration_dir"]); target_dir.mkdir(parents=True, exist_ok=True)
+        uploaded.save(target_dir / filename)
+        config["audio"]["calibration_file"] = filename; monitor.reload_calibration(); save_config(config_path, config)
+        return jsonify({"ok": True, "filename": filename})
+    @app.put("/api/config/mqtt")
+    def set_mqtt():
+        payload = request.get_json(force=True) or {}
+        try:
+            settings = {"enabled": bool(payload.get("enabled", False)), "host": str(payload["host"]).strip(), "port": int(payload["port"]), "username": str(payload.get("username", "")), "discovery_prefix": str(payload.get("discovery_prefix", "homeassistant")).strip("/"), "base_topic": str(payload.get("base_topic", "noisemeter")).strip("/")}
+        except (KeyError, TypeError, ValueError): abort(400, "Ungültige MQTT-Einstellungen")
+        if not settings["host"] or not 1 <= settings["port"] <= 65535 or not settings["base_topic"]: abort(400, "Ungültige MQTT-Einstellungen")
+        password = payload.get("password")
+        settings["password"] = config["mqtt"].get("password", "") if password in (None, "") else str(password)
+        app.extensions["mqtt"].stop()
+        config["mqtt"] = settings; save_config(config_path, config)
+        replacement = MqttPublisher(config["mqtt"], database); replacement.start(); monitor.on_measurement = replacement.publish_measurement
+        app.extensions["mqtt"] = replacement
         return jsonify({"ok": True})
     @app.get("/report/<kind>/<value>.pdf")
     def report(kind, value):

@@ -12,6 +12,7 @@ import time
 import numpy as np
 import sounddevice as sd
 
+from .calibration import CalibrationProfile
 from .database import Database
 
 LOG = logging.getLogger(__name__)
@@ -33,6 +34,18 @@ class NoiseMonitor:
         self.last_measurement = 0.0
         self.on_measurement = None
         self.last_retention_check = None
+        self.smoothed_energy = None
+        self.calibration = CalibrationProfile()
+        self.reload_calibration()
+
+    def reload_calibration(self):
+        filename = self.config["audio"].get("calibration_file")
+        path = Path(self.config["storage"]["calibration_dir"]) / filename if filename else None
+        self.calibration.load(str(path) if path else None)
+        LOG.info("Loaded calibration profile: %s", filename or "none")
+
+    def reset_measurement_response(self):
+        self.smoothed_energy = None
 
     def start(self):
         if self.running: return
@@ -73,8 +86,12 @@ class NoiseMonitor:
         except queue.Full: LOG.warning("Audio queue full; dropping a block")
 
     def _db(self, block):
-        rms = float(np.sqrt(np.mean(np.square(block.astype(np.float64)))))
-        return float(self.config["audio"]["calibration_offset_db"]) + 20 * np.log10(max(rms, 1e-12))
+        rms = self.calibration.weighted_rms(block, self.rate, self.config["audio"].get("weighting", "A"))
+        energy = rms * rms
+        time_constant = 0.125 if self.config["audio"].get("time_weighting", "fast") == "fast" else 1.0
+        alpha = np.exp(-(len(block) / self.rate) / time_constant)
+        self.smoothed_energy = energy if self.smoothed_energy is None else alpha * self.smoothed_energy + (1 - alpha) * energy
+        return float(self.config["audio"]["calibration_offset_db"]) + float(self.config["audio"].get("manual_calibration_db", 0)) + 10 * np.log10(max(self.smoothed_energy, 1e-24))
 
     def _active_period(self, now):
         current = now.strftime("%H:%M")

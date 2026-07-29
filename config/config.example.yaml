@@ -8,9 +8,14 @@ audio:
   pre_roll_seconds: 3
   post_roll_seconds: 5
   mp3_bitrate_kbps: 128        # CBR: 64, 96, 128, 192, 256 oder 320 kbit/s
+  calibration_file: null       # im Webinterface hochladen, z. B. UMIK-2 / MM-2USB
+  manual_calibration_db: 0.0   # zusätzliche manuelle Korrektur in dB
+  weighting: A                 # A (dBA) oder C (dBC)
+  time_weighting: fast         # fast (125 ms) oder slow (1 s)
 storage:
   audio_dir: /var/lib/noisemeter/audio
   retention_days: 360          # Ereignis-MP3s und Einträge werden danach gelöscht
+  calibration_dir: /var/lib/noisemeter/calibration
   database: /var/lib/noisemeter/noisemeter.sqlite3
   report_dir: /var/lib/noisemeter/reports
 web:
