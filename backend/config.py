@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
                 "database": "/var/lib/noisemeter/noisemeter.sqlite3",
                 "report_dir": "/var/lib/noisemeter/reports"},
     "web": {"host": "0.0.0.0", "port": 8080, "secret_key": "change-me"},
+    "site_name": "Strassenseite",
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
              "username": "", "password": "", "discovery_prefix": "homeassistant",
              "base_topic": "noisemeter"},

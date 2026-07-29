@@ -22,6 +22,7 @@ web:
   host: 0.0.0.0
   port: 8080
   secret_key: change-this-secret-key
+site_name: Strassenseite
 mqtt:
   enabled: false
   host: homeassistant.local

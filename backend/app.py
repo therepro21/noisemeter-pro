@@ -4,6 +4,8 @@ import argparse
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import logging
+import zipfile
+from io import BytesIO
 
 from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
@@ -64,7 +66,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -105,14 +107,20 @@ def create_app(config_path: str):
     def set_audio_storage():
         payload = request.get_json(force=True) or {}
         try:
-            bitrate, retention = int(payload["mp3_bitrate_kbps"]), int(payload["retention_days"])
+            bitrate, retention, pre, post = int(payload["mp3_bitrate_kbps"]), int(payload["retention_days"]), float(payload["pre_roll_seconds"]), float(payload["post_roll_seconds"])
         except (KeyError, TypeError, ValueError): abort(400, "Ungültige Audioeinstellungen")
-        if bitrate not in (64, 96, 128, 192, 256, 320) or not 1 <= retention <= 3650:
+        if bitrate not in (64, 96, 128, 192, 256, 320) or not 1 <= retention <= 3650 or not 0 <= pre <= 30 or not 0 <= post <= 60:
             abort(400, "Bitrate oder Aufbewahrungsdauer außerhalb des erlaubten Bereichs")
         config["audio"]["mp3_bitrate_kbps"] = bitrate
         config["storage"]["retention_days"] = retention
+        config["audio"]["pre_roll_seconds"], config["audio"]["post_roll_seconds"] = pre, post
         save_config(config_path, config)
         return jsonify({"ok": True})
+    @app.put("/api/config/site")
+    def set_site():
+        name = str((request.get_json(force=True) or {}).get("site_name", "")).strip()
+        if not 1 <= len(name) <= 100: abort(400, "Ungültiger Messstellenname")
+        config["site_name"] = name; save_config(config_path, config); return jsonify({"ok": True})
     @app.put("/api/config/calibration")
     def set_calibration():
         payload = request.get_json(force=True) or {}
@@ -156,12 +164,31 @@ def create_app(config_path: str):
         return jsonify({"ok": True})
     @app.get("/report/<kind>/<value>.pdf")
     def report(kind, value):
-        if kind not in ("week", "month"): abort(404)
+        if kind not in ("day", "week", "month", "year"): abort(404)
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
         output = Path(config["storage"]["report_dir"]) / f"{kind}_{value}.pdf"
-        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), database.events(start, end))
+        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), database.events(start, end), config["site_name"])
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
+    @app.get("/backup/<kind>/<value>.zip")
+    def backup(kind, value):
+        try: start, end = period_range(kind, value)
+        except ValueError: abort(400)
+        output = Path(config["storage"]["report_dir"]) / f"backup_{kind}_{value}.zip"
+        events = database.events(start, end); root = Path(config["storage"]["audio_dir"])
+        from openpyxl import Workbook
+        workbook = Workbook(); sheet = workbook.active; sheet.title = "Ereignisse"
+        sheet.append(["Zeitpunkt", "Peak dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "MP3-Datei"])
+        for event in events:
+            sheet.append([event["occurred_at"], event["peak_db"], event["threshold_db"], event["period_name"], event["duration_seconds"], event["filename"]])
+        for column, width in zip("ABCDEF", (22, 12, 15, 18, 16, 42)): sheet.column_dimensions[column].width = width
+        stream = BytesIO(); workbook.save(stream)
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("ereignisse.xlsx", stream.getvalue())
+            for event in events:
+                audio = root / event["filename"]
+                if audio.is_file(): archive.write(audio, f"audio/{event['filename']}")
+        return send_file(output, as_attachment=True, download_name=output.name)
     return app
 
 def main():

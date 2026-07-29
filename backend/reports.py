@@ -7,11 +7,12 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
-def create_report(path: Path, title: str, start: str, end: str, summary: dict, events: list[dict]):
+def create_report(path: Path, title: str, start: str, end: str, summary: dict, events: list[dict], site_name: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     styles = getSampleStyleSheet()
     document = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=1.6*cm, rightMargin=1.6*cm, topMargin=1.5*cm)
-    story = [Paragraph("NoiseMeter Pro", styles["Title"]), Paragraph(title, styles["Heading2"]),
+    styles["Title"].textColor = colors.HexColor("#17324d")
+    story = [Paragraph("NoiseMeter Pro", styles["Title"]), Paragraph(f"Messstelle: {site_name}", styles["Heading2"]), Paragraph(title, styles["Heading2"]),
              Paragraph(f"Zeitraum: {start} bis {end}", styles["Normal"]), Spacer(1, 0.5*cm)]
     statistics = [["Ereignisse", "Maximalpegel", "Durchschnitt Ereignisse"],
                   [str(summary["event_count"]), f"{summary['peak_db']:.1f} dB", f"{summary['average_db']:.1f} dB"]]
@@ -25,4 +26,5 @@ def create_report(path: Path, title: str, start: str, end: str, summary: dict, e
     events_table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2a6f97")), ("TEXTCOLOR", (0,0), (-1,0), colors.white),
         ("GRID", (0,0), (-1,-1), .25, colors.lightgrey), ("FONT", (0,0), (-1,0), "Helvetica-Bold"), ("PADDING", (0,0), (-1,-1), 5)]))
     story.append(events_table)
+    story += [Spacer(1, .5*cm), Paragraph("Copyright by Michael P. Thiess", styles["Normal"])]
     document.build(story)
