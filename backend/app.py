@@ -66,7 +66,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -121,6 +121,12 @@ def create_app(config_path: str):
         name = str((request.get_json(force=True) or {}).get("site_name", "")).strip()
         if not 1 <= len(name) <= 100: abort(400, "Ungültiger Messstellenname")
         config["site_name"] = name; save_config(config_path, config); return jsonify({"ok": True})
+    @app.put("/api/config/refresh")
+    def set_refresh():
+        try: seconds = int((request.get_json(force=True) or {})["refresh_seconds"])
+        except (KeyError, TypeError, ValueError): abort(400, "Ungültiges Aktualisierungsintervall")
+        if not 5 <= seconds <= 3600: abort(400, "Intervall muss zwischen 5 und 3600 Sekunden liegen")
+        config["web"]["refresh_seconds"] = seconds; save_config(config_path, config); return jsonify({"ok": True})
     @app.put("/api/config/calibration")
     def set_calibration():
         payload = request.get_json(force=True) or {}
