@@ -43,6 +43,34 @@ def create_app(config_path: str):
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
     def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device")}})
+    @app.get("/api/audio-devices")
+    def audio_devices():
+        try:
+            return jsonify({"devices": monitor.input_devices(), "selected": config["audio"].get("device")})
+        except Exception as error:
+            logging.exception("Could not list audio devices")
+            return jsonify({"error": str(error), "devices": [], "selected": config["audio"].get("device")}), 500
+    @app.put("/api/audio-device")
+    def set_audio_device():
+        payload = request.get_json(force=True) or {}
+        device = payload.get("device")
+        if device is not None:
+            try: device = int(device)
+            except (TypeError, ValueError): abort(400, "Ungültiges Mikrofon")
+        try:
+            available = {item["id"] for item in monitor.input_devices()}
+        except Exception as error:
+            return jsonify({"ok": False, "error": str(error)}), 500
+        if device is not None and device not in available: abort(400, "Mikrofon nicht verfügbar")
+        previous = config["audio"].get("device")
+        try:
+            monitor.select_device(device)
+            save_config(config_path, config)
+            return jsonify({"ok": True, "device": device})
+        except Exception as error:
+            config["audio"]["device"] = previous
+            logging.exception("Could not switch audio input")
+            return jsonify({"ok": False, "error": str(error)}), 500
     @app.put("/api/config/periods")
     def set_periods():
         periods = request.get_json(force=True)

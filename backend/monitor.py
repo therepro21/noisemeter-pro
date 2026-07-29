@@ -34,6 +34,9 @@ class NoiseMonitor:
 
     def start(self):
         if self.running: return
+        while not self.samples.empty():
+            try: self.samples.get_nowait()
+            except queue.Empty: break
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True, name="noise-monitor")
         self.thread.start()
@@ -46,6 +49,21 @@ class NoiseMonitor:
         with self.lock:
             return {"db": round(self.current_db, 1), "updated_at": self.last_update,
                     "recording": self.recording is not None, "device": self.config["audio"]["device"]}
+
+    def input_devices(self):
+        """Return only usable capture devices for the device picker."""
+        devices = []
+        for index, device in enumerate(sd.query_devices()):
+            if device["max_input_channels"] > 0:
+                devices.append({"id": index, "name": device["name"],
+                                "channels": int(device["max_input_channels"])})
+        return devices
+
+    def select_device(self, device):
+        """Switch the input stream without requiring a service restart."""
+        self.stop()
+        self.config["audio"]["device"] = device
+        self.start()
 
     def _callback(self, indata, frames, timing, status):
         if status: LOG.warning("Audio status: %s", status)

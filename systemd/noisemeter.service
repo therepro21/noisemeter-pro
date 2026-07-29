@@ -5,7 +5,8 @@ After=network.target sound.target
 [Service]
 Type=simple
 User=noisemeter
-Group=audio
+Group=noisemeter
+SupplementaryGroups=audio
 WorkingDirectory=/opt/noisemeter-pro
 ExecStart=/opt/noisemeter-pro/venv/bin/python -m backend.app --config /etc/noisemeter/config.yaml
 Restart=always
