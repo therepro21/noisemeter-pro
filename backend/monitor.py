@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 import queue
@@ -31,6 +31,8 @@ class NoiseMonitor:
         self.thread = None
         self.recording = None
         self.last_measurement = 0.0
+        self.on_measurement = None
+        self.last_retention_check = None
 
     def start(self):
         if self.running: return
@@ -99,12 +101,17 @@ class NoiseMonitor:
 
     def _process(self, block):
         now = datetime.now()
+        if self.last_retention_check != now.date():
+            self._apply_retention(now)
+            self.last_retention_check = now.date()
         db_value = self._db(block)
         with self.lock:
             self.current_db, self.last_update = db_value, now.isoformat(timespec="seconds")
         self.ring.append(block)
         if time.monotonic() - self.last_measurement >= 1:
             self.database.add_measurement(now.isoformat(timespec="seconds"), db_value)
+            if self.on_measurement:
+                self.on_measurement(now.isoformat(timespec="seconds"), db_value)
             self.last_measurement = time.monotonic()
         if self.recording:
             self.recording["blocks"].append(block)
@@ -129,7 +136,8 @@ class NoiseMonitor:
         target.parent.mkdir(parents=True, exist_ok=True)
         raw = np.concatenate(record["blocks"], axis=0)
         try:
-            command = ["ffmpeg", "-y", "-f", "f32le", "-ar", str(self.rate), "-ac", str(self.channels), "-i", "pipe:0", "-codec:a", "libmp3lame", "-q:a", "3", str(target)]
+            bitrate = int(self.config["audio"].get("mp3_bitrate_kbps", 128))
+            command = ["ffmpeg", "-y", "-f", "f32le", "-ar", str(self.rate), "-ac", str(self.channels), "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(target)]
             subprocess.run(command, input=raw.astype("float32").tobytes(), check=True, capture_output=True, timeout=30)
             self.database.add_event({"occurred_at": started.isoformat(timespec="seconds"), "peak_db": record["peak"],
                 "threshold_db": float(record["period"]["threshold_db"]), "period_name": record["period"]["name"],
@@ -137,3 +145,16 @@ class NoiseMonitor:
             LOG.info("Event saved: %s", target)
         except Exception:
             LOG.exception("Could not encode event audio")
+
+    def _apply_retention(self, now):
+        days = int(self.config["storage"].get("retention_days", 360))
+        if days <= 0:
+            return
+        cutoff = (now - timedelta(days=days)).isoformat(timespec="seconds")
+        root = Path(self.config["storage"]["audio_dir"]).resolve()
+        for filename in self.database.remove_events_before(cutoff):
+            target = (root / filename).resolve()
+            if target.is_relative_to(root):
+                try: target.unlink(missing_ok=True)
+                except OSError: LOG.warning("Could not remove expired audio: %s", target)
+        LOG.info("Applied %d-day audio retention", days)

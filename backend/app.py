@@ -10,7 +10,9 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, se
 from .config import load_config, save_config
 from .database import Database
 from .monitor import NoiseMonitor
+from .mqtt import MqttPublisher
 from .reports import create_report
+from .system_info import SystemInfo
 
 def period_range(kind: str, value: str):
     if kind == "day":
@@ -27,22 +29,33 @@ def create_app(config_path: str):
     config = load_config(config_path)
     app = Flask(__name__); app.config["SECRET_KEY"] = config["web"]["secret_key"]
     database = Database(config["storage"]["database"]); monitor = NoiseMonitor(config, database)
+    mqtt = MqttPublisher(config["mqtt"], database); monitor.on_measurement = mqtt.publish_measurement
+    mqtt.start()
+    system_info = SystemInfo(config["storage"]["audio_dir"])
     app.extensions["monitor"], app.extensions["database"], app.extensions["nm_config"], app.extensions["config_path"] = monitor, database, config, config_path
 
     @app.get("/")
     def index(): return render_template("index.html")
     @app.get("/api/status")
     def status(): return jsonify(monitor.status())
+    @app.get("/api/system")
+    def system_status(): return jsonify(system_info.read())
     @app.get("/api/events")
     def events():
         kind, value = request.args.get("kind", "day"), request.args.get("date", date.today().isoformat())
         try: start, end = period_range(kind, value)
         except ValueError: abort(400, "Ungültiger Zeitraum")
         return jsonify({"start": start, "end": end, "summary": database.summary(start, end), "events": database.events(start, end)})
+    @app.get("/api/history")
+    def history():
+        value = request.args.get("date", date.today().isoformat())
+        try: start, end = period_range("day", value)
+        except ValueError: abort(400, "Ungültiges Datum")
+        return jsonify({"date": value, "points": database.day_history(start, end)})
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device")}})
+    def get_config(): return jsonify({"periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps")}, "storage": {"retention_days": config["storage"]["retention_days"]}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -79,6 +92,18 @@ def create_app(config_path: str):
             if not all(key in period for key in ("name", "start", "end", "threshold_db")): abort(400, "Unvollständiger Zeitbereich")
             datetime.strptime(period["start"], "%H:%M"); datetime.strptime(period["end"], "%H:%M"); period["threshold_db"] = float(period["threshold_db"])
         config["periods"] = periods; save_config(config_path, config); return jsonify({"ok": True})
+    @app.put("/api/config/audio-storage")
+    def set_audio_storage():
+        payload = request.get_json(force=True) or {}
+        try:
+            bitrate, retention = int(payload["mp3_bitrate_kbps"]), int(payload["retention_days"])
+        except (KeyError, TypeError, ValueError): abort(400, "Ungültige Audioeinstellungen")
+        if bitrate not in (64, 96, 128, 192, 256, 320) or not 1 <= retention <= 3650:
+            abort(400, "Bitrate oder Aufbewahrungsdauer außerhalb des erlaubten Bereichs")
+        config["audio"]["mp3_bitrate_kbps"] = bitrate
+        config["storage"]["retention_days"] = retention
+        save_config(config_path, config)
+        return jsonify({"ok": True})
     @app.get("/report/<kind>/<value>.pdf")
     def report(kind, value):
         if kind not in ("week", "month"): abort(404)

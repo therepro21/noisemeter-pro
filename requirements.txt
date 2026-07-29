@@ -3,3 +3,4 @@ sounddevice>=0.4.6
 numpy>=1.26,<3.0
 PyYAML>=6.0
 reportlab>=4.0
+paho-mqtt>=1.6,<3.0

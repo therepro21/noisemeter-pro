@@ -21,3 +21,20 @@ Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`. Die Namen enthalten Datum, 
 ## Kalibrierung
 
 `calibration_offset_db` ist vom Mikrofon abhängig und muss für reale dB(SPL)-Werte kalibriert werden. Mit einem 1-kHz-Kalibrator bei 94 dB den Wert so ändern, dass die Liveanzeige 94 dB zeigt, dann `sudo systemctl restart noisemeter` ausführen.
+
+## Home Assistant per MQTT
+
+MQTT ist standardmäßig deaktiviert. In `/etc/noisemeter/config.yaml` den folgenden Abschnitt eintragen bzw. anpassen und danach den Dienst neu starten:
+
+```yaml
+mqtt:
+  enabled: true
+  host: homeassistant.local
+  port: 1883
+  username: mqtt-benutzer
+  password: mqtt-passwort
+  discovery_prefix: homeassistant
+  base_topic: noisemeter
+```
+
+Nach dem Neustart (`sudo systemctl restart noisemeter`) erscheinen automatisch vier Sensoren in Home Assistant: aktueller Schallpegel sowie Tages-, Wochen- und Monatshöchstwert. Die Messwerte werden als dB veröffentlicht.

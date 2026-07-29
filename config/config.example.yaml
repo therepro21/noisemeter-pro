@@ -7,14 +7,24 @@ audio:
   calibration_offset_db: 94.0 # calibrate with a known 94 dB / 1 kHz source
   pre_roll_seconds: 3
   post_roll_seconds: 5
+  mp3_bitrate_kbps: 128        # CBR: 64, 96, 128, 192, 256 oder 320 kbit/s
 storage:
   audio_dir: /var/lib/noisemeter/audio
+  retention_days: 360          # Ereignis-MP3s und Einträge werden danach gelöscht
   database: /var/lib/noisemeter/noisemeter.sqlite3
   report_dir: /var/lib/noisemeter/reports
 web:
   host: 0.0.0.0
   port: 8080
   secret_key: change-this-secret-key
+mqtt:
+  enabled: false
+  host: homeassistant.local
+  port: 1883
+  username: ""
+  password: ""
+  discovery_prefix: homeassistant
+  base_topic: noisemeter
 # At least one enabled time window can be active. Windows may cross midnight.
 periods:
   - name: Tag
