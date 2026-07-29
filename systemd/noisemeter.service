@@ -1,0 +1,16 @@
+[Unit]
+Description=NoiseMeter Pro USB microphone monitor
+After=network.target sound.target
+
+[Service]
+Type=simple
+User=noisemeter
+Group=audio
+WorkingDirectory=/opt/noisemeter-pro
+ExecStart=/opt/noisemeter-pro/venv/bin/python -m backend.app --config /etc/noisemeter/config.yaml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
