@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
                 "report_dir": "/var/lib/noisemeter/reports"},
     "web": {"host": "0.0.0.0", "port": 8080, "secret_key": "change-me", "refresh_seconds": 5},
     "site_name": "Strassenseite",
+    "site_data": {"location": "", "orientation": "", "target_object": "", "ground_distance": "", "wall_distance": "", "microphone": ""},
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
              "username": "", "password": "", "discovery_prefix": "homeassistant",
              "base_topic": "noisemeter"},

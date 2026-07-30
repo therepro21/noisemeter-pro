@@ -56,7 +56,12 @@ def create_app(config_path: str):
         kind, value = request.args.get("kind", "day"), request.args.get("date", date.today().isoformat())
         try: start, end = period_range(kind, value)
         except ValueError: abort(400, "Ungültiger Zeitraum")
-        return jsonify({"start": start, "end": end, "summary": database.summary(start, end), "events": database.events(start, end)})
+        items = database.events(start, end); periods = {p["name"]: p for p in config["periods"]}
+        for item in items:
+            period = periods.get(item["period_name"], {})
+            item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10))
+            item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
+        return jsonify({"start": start, "end": end, "summary": database.summary(start, end), "events": items})
     @app.get("/api/history")
     def history():
         value = request.args.get("date", date.today().isoformat())
@@ -66,7 +71,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -102,6 +107,8 @@ def create_app(config_path: str):
         for period in periods:
             if not all(key in period for key in ("name", "start", "end", "threshold_db")): abort(400, "Unvollständiger Zeitbereich")
             datetime.strptime(period["start"], "%H:%M"); datetime.strptime(period["end"], "%H:%M"); period["threshold_db"] = float(period["threshold_db"])
+            period["warning_db"] = float(period.get("warning_db", period["threshold_db"] + 10)); period["severe_db"] = float(period.get("severe_db", period["threshold_db"] + 15)); period["enabled"] = bool(period.get("enabled", True))
+            if not period["threshold_db"] < period["warning_db"] < period["severe_db"]: abort(400, "Pegel müssen aufsteigend sein")
         config["periods"] = periods; save_config(config_path, config); return jsonify({"ok": True})
     @app.put("/api/config/audio-storage")
     def set_audio_storage():
@@ -120,7 +127,9 @@ def create_app(config_path: str):
     def set_site():
         name = str((request.get_json(force=True) or {}).get("site_name", "")).strip()
         if not 1 <= len(name) <= 100: abort(400, "Ungültiger Messstellenname")
-        config["site_name"] = name; save_config(config_path, config); return jsonify({"ok": True})
+        payload = request.get_json(force=True) or {}; config["site_name"] = name
+        config["site_data"] = {key: str(payload.get(key, ""))[:100] for key in ("location", "orientation", "target_object", "ground_distance", "wall_distance", "microphone")}
+        save_config(config_path, config); return jsonify({"ok": True})
     @app.put("/api/config/refresh")
     def set_refresh():
         try: seconds = int((request.get_json(force=True) or {})["refresh_seconds"])
@@ -174,7 +183,10 @@ def create_app(config_path: str):
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
         output = Path(config["storage"]["report_dir"]) / f"{kind}_{value}.pdf"
-        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), database.events(start, end), config["site_name"])
+        items = database.events(start, end); period_map = {p["name"]: p for p in config["periods"]}
+        for item in items:
+            period = period_map.get(item["period_name"], {}); item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10)); item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
+        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), items, config["site_name"], config.get("site_data"))
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):
