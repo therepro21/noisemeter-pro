@@ -73,6 +73,11 @@ class Database:
                 ORDER BY minute
             """, (start, end))]
 
+    def level_breakdown(self, kind: str, start: str, end: str):
+        grouping = {"day": "substr(recorded_at,12,2) || ':00'", "week": "substr(recorded_at,1,10)", "month": "strftime('%Y-W%W', recorded_at)", "year": "substr(recorded_at,1,7)"}[kind]
+        with self.connection() as db:
+            return [dict(row) for row in db.execute(f"SELECT {grouping} label, MAX(db) maximum_db, AVG(db) average_db FROM measurements WHERE recorded_at >= ? AND recorded_at < ? GROUP BY {grouping} ORDER BY label", (start, end))]
+
     def remove_events_before(self, timestamp: str):
         with self.connection() as db:
             files = [row["filename"] for row in db.execute("SELECT filename FROM events WHERE occurred_at < ?", (timestamp,))]

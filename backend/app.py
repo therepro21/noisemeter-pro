@@ -68,6 +68,12 @@ def create_app(config_path: str):
         try: start, end = period_range("day", value)
         except ValueError: abort(400, "Ungültiges Datum")
         return jsonify({"date": value, "points": database.day_history(start, end)})
+    @app.get("/api/breakdown")
+    def breakdown():
+        kind, value = request.args.get("kind", "day"), request.args.get("date", date.today().isoformat())
+        try: start, end = period_range(kind, value)
+        except ValueError: abort(400)
+        return jsonify({"items": database.level_breakdown(kind, start, end)})
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
@@ -186,7 +192,7 @@ def create_app(config_path: str):
         items = database.events(start, end); period_map = {p["name"]: p for p in config["periods"]}
         for item in items:
             period = period_map.get(item["period_name"], {}); item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10)); item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
-        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), items, config["site_name"], config.get("site_data"))
+        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), items, config["site_name"], config.get("site_data"), database.level_breakdown(kind, start, end))
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):
