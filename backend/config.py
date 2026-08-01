@@ -5,7 +5,7 @@ import copy
 import yaml
 
 DEFAULT_CONFIG = {
-    "audio": {"device": None, "sample_rate": 48000, "channels": 1, "mp3_bitrate_kbps": 128,
+    "audio": {"device": None, "microphone_name": "", "sample_rate": 48000, "channels": 1, "mp3_bitrate_kbps": 128,
               "calibration_file": None, "manual_calibration_db": 0.0,
               "weighting": "A", "time_weighting": "fast",
               "block_seconds": 0.25, "calibration_offset_db": 94.0,

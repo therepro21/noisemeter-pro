@@ -28,6 +28,7 @@ class NoiseMonitor:
         self.ring = deque(maxlen=self.pre_blocks)
         self.samples = queue.Queue(maxsize=64)
         self.current_db, self.last_update, self.running = 0.0, None, False
+        self.device_available, self.device_error = False, None
         self.lock = threading.Lock()
         self.thread = None
         self.recording = None
@@ -62,7 +63,9 @@ class NoiseMonitor:
 
     def status(self):
         with self.lock:
-            return {"db": round(self.current_db, 1), "updated_at": self.last_update,
+            return {"db": round(self.current_db, 1) if self.device_available else None,
+                    "available": self.device_available, "error": self.device_error,
+                    "updated_at": self.last_update,
                     "recording": self.recording is not None, "device": self.config["audio"]["device"]}
 
     def input_devices(self):
@@ -107,12 +110,17 @@ class NoiseMonitor:
         try:
             with sd.InputStream(device=audio.get("device"), samplerate=self.rate, channels=self.channels,
                                 blocksize=self.blocksize, dtype="float32", callback=self._callback):
+                with self.lock:
+                    self.device_available, self.device_error = True, None
                 LOG.info("Audio monitor started")
                 while self.running:
                     try: block = self.samples.get(timeout=1)
                     except queue.Empty: continue
                     self._process(block)
-        except Exception:
+        except Exception as error:
+            with self.lock:
+                self.device_available, self.device_error = False, str(error)
+                self.current_db, self.last_update, self.recording = 0.0, None, None
             LOG.exception("Audio monitor stopped due to input error")
             self.running = False
 

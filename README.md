@@ -1,6 +1,6 @@
-# NoiseMeter Pro 1.0
+# NoiseMeter Pro 2.0
 
-Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Mikrofon. Das Gerät misst permanent den Pegel, löst in drei frei definierbaren Zeitbereichen aus und speichert ein MP3 mit 3 Sekunden Vorlauf und 5 Sekunden Nachlauf.
+Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Mikrofon. Das Gerät misst permanent den Pegel, löst in drei frei definierbaren Zeitbereichen aus und speichert Ereignisse als MP3 mit konfigurierbarem Vor- und Nachlauf.
 
 ## Installation auf Raspberry Pi OS Bookworm
 
@@ -14,7 +14,11 @@ Danach ist die Weboberfläche unter `http://<IP-des-Pi>:8080` verfügbar. Der Di
 
 ## Bedienung
 
-Das Webinterface zeigt Live-Pegel, Tag, ISO-Woche und Monat. Die Ereignisliste spielt MP3-Dateien direkt ab und erzeugt Wochen- oder Monatsberichte als PDF. Die drei Zeitbereiche lassen sich dort ändern.
+Das responsive Webinterface zeigt Live-Pegel sowie Tages-, ISO-Wochen-, Monats- und Jahresübersichten. In der Tagesübersicht werden die drei konfigurierten Tageszeiten mit Ereignisanzahl sowie Minimal-, Durchschnitts- und Maximalpegel ausgewertet. Die Ereignisliste spielt MP3-Dateien direkt ab; deutsche PDF-Berichte und ZIP-Backups stehen für alle Übersichten bereit.
+
+Das Dark Theme ist standardmäßig aktiv und kann über das Sonnensymbol im Kopfbereich umgeschaltet werden. In den Einstellungen lassen sich USB-Gerät und ein kurzer eigener Messmikrofonname festlegen. Dieser Name erscheint auch in den PDF-Berichten. Ist kein Messmikrofon verfügbar, werden keine künstlichen Pegelwerte angezeigt oder gespeichert.
+
+Fehlmessungen können unter **Einstellungen → Messdaten löschen** für einen Datumsbereich vollständig entfernt werden. Dabei werden Messwerte, Ereignisse und zugehörige MP3-Dateien dauerhaft gelöscht; vorher ist eine ausdrückliche Bestätigung erforderlich.
 
 Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`. Die Namen enthalten Datum, Uhrzeit und Spitzenpegel. Konfiguration: `/etc/noisemeter/config.yaml`.
 
@@ -24,7 +28,7 @@ Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`. Die Namen enthalten Datum, 
 
 ## Home Assistant per MQTT
 
-MQTT ist standardmäßig deaktiviert. In `/etc/noisemeter/config.yaml` den folgenden Abschnitt eintragen bzw. anpassen und danach den Dienst neu starten:
+MQTT ist standardmäßig deaktiviert und kann im Webinterface konfiguriert werden. Alternativ lässt sich der Abschnitt in `/etc/noisemeter/config.yaml` bearbeiten:
 
 ```yaml
 mqtt:
@@ -37,4 +41,4 @@ mqtt:
   base_topic: noisemeter
 ```
 
-Nach dem Neustart (`sudo systemctl restart noisemeter`) erscheinen automatisch vier Sensoren in Home Assistant: aktueller Schallpegel sowie Tages-, Wochen- und Monatshöchstwert. Die Messwerte werden als dB veröffentlicht.
+Nach dem Neustart (`sudo systemctl restart noisemeter`) erscheinen automatisch Sensoren in Home Assistant. Die Messwerte werden als dB veröffentlicht.

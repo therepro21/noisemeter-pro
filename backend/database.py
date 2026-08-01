@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from datetime import date, timedelta
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS measurements (
@@ -77,6 +78,55 @@ class Database:
         grouping = {"day": "substr(recorded_at,12,2) || ':00'", "week": "substr(recorded_at,1,10)", "month": "strftime('%Y-W%W', recorded_at)", "year": "substr(recorded_at,1,7)"}[kind]
         with self.connection() as db:
             return [dict(row) for row in db.execute(f"SELECT {grouping} label, MAX(db) maximum_db, AVG(db) average_db FROM measurements WHERE recorded_at >= ? AND recorded_at < ? GROUP BY {grouping} ORDER BY label", (start, end))]
+
+    def period_statistics(self, selected_day: date, periods: list[dict]):
+        """Measurement and event statistics for each configured clock-time period."""
+        start, end = selected_day.isoformat(), (selected_day + timedelta(days=1)).isoformat()
+        result = []
+        with self.connection() as db:
+            for period in periods:
+                period_start, period_end = period["start"], period["end"]
+                if period_start < period_end:
+                    measurement_time = "time(recorded_at) >= ? AND time(recorded_at) < ?"
+                    event_time = "time(occurred_at) >= ? AND time(occurred_at) < ?"
+                    params = (period_start, period_end)
+                else:
+                    measurement_time = "(time(recorded_at) >= ? OR time(recorded_at) < ?)"
+                    event_time = "(time(occurred_at) >= ? OR time(occurred_at) < ?)"
+                    params = (period_start, period_end)
+                levels = db.execute(
+                    f"""SELECT COUNT(*) measurement_count, MIN(db) minimum_db,
+                        MAX(db) maximum_db, AVG(db) average_db FROM measurements
+                        WHERE recorded_at >= ? AND recorded_at < ? AND {measurement_time}""",
+                    (start, end, *params),
+                ).fetchone()
+                event_count = db.execute(
+                    f"SELECT COUNT(*) count FROM events WHERE occurred_at >= ? AND occurred_at < ? AND {event_time}",
+                    (start, end, *params),
+                ).fetchone()["count"]
+                result.append({
+                    "name": period["name"], "start": period_start, "end": period_end,
+                    "event_count": event_count, "measurement_count": levels["measurement_count"],
+                    "minimum_db": levels["minimum_db"], "maximum_db": levels["maximum_db"],
+                    "average_db": levels["average_db"],
+                })
+        return result
+
+    def delete_range(self, start: str, end: str):
+        """Delete all measurements and events in [start, end), returning audio names."""
+        with self.connection() as db:
+            files = [row["filename"] for row in db.execute(
+                "SELECT filename FROM events WHERE occurred_at >= ? AND occurred_at < ?", (start, end)
+            )]
+            event_count = db.execute(
+                "SELECT COUNT(*) count FROM events WHERE occurred_at >= ? AND occurred_at < ?", (start, end)
+            ).fetchone()["count"]
+            measurement_count = db.execute(
+                "SELECT COUNT(*) count FROM measurements WHERE recorded_at >= ? AND recorded_at < ?", (start, end)
+            ).fetchone()["count"]
+            db.execute("DELETE FROM events WHERE occurred_at >= ? AND occurred_at < ?", (start, end))
+            db.execute("DELETE FROM measurements WHERE recorded_at >= ? AND recorded_at < ?", (start, end))
+        return {"events": event_count, "measurements": measurement_count, "files": files}
 
     def remove_events_before(self, timestamp: str):
         with self.connection() as db:

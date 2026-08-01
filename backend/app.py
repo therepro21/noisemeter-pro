@@ -74,10 +74,15 @@ def create_app(config_path: str):
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
         return jsonify({"items": database.level_breakdown(kind, start, end)})
+    @app.get("/api/period-statistics")
+    def period_statistics():
+        try: selected_day = datetime.strptime(request.args.get("date", date.today().isoformat()), "%Y-%m-%d").date()
+        except ValueError: abort(400, "Ungültiges Datum")
+        return jsonify({"date": selected_day.isoformat(), "items": database.period_statistics(selected_day, config["periods"])})
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"][k] for k in ("calibration_offset_db", "device", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "2.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -89,6 +94,8 @@ def create_app(config_path: str):
     def set_audio_device():
         payload = request.get_json(force=True) or {}
         device = payload.get("device")
+        microphone_name = str(payload.get("microphone_name", "")).strip()
+        if len(microphone_name) > 100: abort(400, "Mikrofonname ist zu lang")
         if device is not None:
             try: device = int(device)
             except (TypeError, ValueError): abort(400, "Ungültiges Mikrofon")
@@ -100,8 +107,9 @@ def create_app(config_path: str):
         previous = config["audio"].get("device")
         try:
             monitor.select_device(device)
+            config["audio"]["microphone_name"] = microphone_name
             save_config(config_path, config)
-            return jsonify({"ok": True, "device": device})
+            return jsonify({"ok": True, "device": device, "microphone_name": microphone_name})
         except Exception as error:
             config["audio"]["device"] = previous
             logging.exception("Could not switch audio input")
@@ -136,6 +144,24 @@ def create_app(config_path: str):
         payload = request.get_json(force=True) or {}; config["site_name"] = name
         config["site_data"] = {key: str(payload.get(key, ""))[:100] for key in ("location", "orientation", "target_object", "ground_distance", "wall_distance", "microphone")}
         save_config(config_path, config); return jsonify({"ok": True})
+    @app.delete("/api/data")
+    def delete_data():
+        payload = request.get_json(force=True) or {}
+        try:
+            start_date = datetime.strptime(str(payload["from"]), "%Y-%m-%d").date()
+            end_date = datetime.strptime(str(payload["to"]), "%Y-%m-%d").date()
+        except (KeyError, TypeError, ValueError): abort(400, "Ungültiger Löschzeitraum")
+        if start_date > end_date: abort(400, "Das Von-Datum muss vor dem Bis-Datum liegen")
+        start, end = start_date.isoformat(), (end_date + timedelta(days=1)).isoformat()
+        deleted = database.delete_range(start, end)
+        root = Path(config["storage"]["audio_dir"]).resolve()
+        removed_files = 0
+        for filename in deleted.pop("files"):
+            target = (root / filename).resolve()
+            if target.is_relative_to(root) and target.is_file():
+                try: target.unlink(); removed_files += 1
+                except OSError: logging.warning("Could not delete audio file %s", target)
+        return jsonify({"ok": True, **deleted, "audio_files": removed_files, "from": start_date.isoformat(), "to": end_date.isoformat()})
     @app.put("/api/config/refresh")
     def set_refresh():
         try: seconds = int((request.get_json(force=True) or {})["refresh_seconds"])
@@ -192,7 +218,11 @@ def create_app(config_path: str):
         items = database.events(start, end); period_map = {p["name"]: p for p in config["periods"]}
         for item in items:
             period = period_map.get(item["period_name"], {}); item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10)); item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
-        create_report(output, f"{kind.title()}bericht", start, end, database.summary(start, end), items, config["site_name"], config.get("site_data"), database.level_breakdown(kind, start, end))
+        titles = {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"}
+        site_data = dict(config.get("site_data") or {})
+        site_data["microphone"] = config["audio"].get("microphone_name") or site_data.get("microphone", "")
+        logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
+        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo)
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):
