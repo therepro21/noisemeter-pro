@@ -6,7 +6,7 @@ const db = value => value == null ? '–' : `${Number(value).toFixed(1).replace(
 let kind = 'day';
 let selected = new Date();
 let refreshSeconds = 5;
-let statusTimer;
+const LIVE_STATUS_INTERVAL_MS = 100;
 
 function toast(message, error = false) {
   const box = $('#toast'); box.textContent = message; box.className = error ? 'show error' : 'show';
@@ -45,6 +45,10 @@ async function loadStatus() {
     }
     $('#recording').hidden = !value.recording;
   } catch (_) { $('#connection').textContent = '● Keine Verbindung'; $('#connection').className = 'offline'; }
+}
+async function pollStatus() {
+  await loadStatus();
+  setTimeout(pollStatus, LIVE_STATUS_INTERVAL_MS);
 }
 function drawHistory(points) {
   const canvas = $('#history-chart'), width = canvas.clientWidth || 600, height = canvas.clientHeight || 150, ratio = devicePixelRatio || 1;
@@ -110,7 +114,7 @@ $('#save-audio').onclick = async event => { event.preventDefault(); try { await 
 $('#save-measurement').onclick = async event => { event.preventDefault(); try { await api('/api/config/measurement', json('PUT', {weighting:$('#weighting').value, time_weighting:$('#time-weighting').value})); $('#measurement-dialog').close(); toast('Messart gespeichert.'); } catch (_) { toast('Messart konnte nicht gespeichert werden.', true); } };
 $('#save-calibration').onclick = async event => { event.preventDefault(); try { await api('/api/config/calibration', json('PUT', {manual_calibration_db:+$('#manual-calibration').value})); toast('Kalibrierung gespeichert.'); } catch (_) { toast('Kalibrierung ist ungültig.', true); } };
 $('#upload-calibration').onclick = async event => { event.preventDefault(); const file = $('#calibration-upload').files[0]; if (!file) return; const data = new FormData(); data.append('file', file); try { await api('/api/config/calibration-file', {method:'POST', body:data}); await loadConfig(); toast('Kalibrierdatei geladen.'); } catch (_) { toast('Datei konnte nicht geladen werden.', true); } };
-$('#save-refresh').onclick = async event => { event.preventDefault(); try { await api('/api/config/refresh', json('PUT', {refresh_seconds:+$('#refresh-seconds').value})); refreshSeconds = +$('#refresh-seconds').value; clearInterval(statusTimer); statusTimer = setInterval(loadStatus, refreshSeconds * 1000); $('#refresh-dialog').close(); toast('Aktualisierung gespeichert.'); } catch (_) { toast('Intervall muss zwischen 5 und 3600 Sekunden liegen.', true); } };
+$('#save-refresh').onclick = async event => { event.preventDefault(); try { await api('/api/config/refresh', json('PUT', {refresh_seconds:+$('#refresh-seconds').value})); refreshSeconds = +$('#refresh-seconds').value; $('#refresh-dialog').close(); toast('Aktualisierung gespeichert. Der Live-Pegel läuft unabhängig davon in Echtzeit.'); } catch (_) { toast('Intervall muss zwischen 5 und 3600 Sekunden liegen.', true); } };
 $('#save-mqtt').onclick = async event => { event.preventDefault(); const body = {enabled:$('#mqtt-enabled').checked, host:$('#mqtt-host').value, port:+$('#mqtt-port').value, username:$('#mqtt-user').value, password:$('#mqtt-password').value, discovery_prefix:$('#mqtt-discovery').value, base_topic:$('#mqtt-topic').value}; try { await api('/api/config/mqtt', json('PUT', body)); $('#mqtt-dialog').close(); toast('MQTT-Einstellungen gespeichert.'); } catch (_) { toast('MQTT-Einstellungen sind ungültig.', true); } };
 $('#delete-data').onclick = async event => { event.preventDefault(); const from = $('#delete-from').value, to = $('#delete-to').value; if (!from || !to || !$('#delete-confirm').checked) return toast('Bitte Zeitraum und Löschbestätigung angeben.', true); if (!confirm(`Alle Messdaten vom ${from} bis einschließlich ${to} dauerhaft löschen?`)) return; try { const result = await api('/api/data', json('DELETE', {from, to})); $('#delete-dialog').close(); $('#delete-confirm').checked = false; await Promise.all([loadEvents(), loadCounts()]); toast(`${result.measurements} Messwerte, ${result.events} Ereignisse und ${result.audio_files} Audiodateien gelöscht.`); } catch (_) { toast('Daten konnten nicht gelöscht werden.', true); } };
 $$('[data-kind]').forEach(button => button.onclick = () => { kind = button.dataset.kind; loadEvents(); });
@@ -119,5 +123,5 @@ function move(direction) { if (kind === 'day') selected.setDate(selected.getDate
 $('#previous').onclick = () => move(-1); $('#next').onclick = () => move(1);
 
 const savedTheme = localStorage.getItem('noisemeter-theme'); document.body.dataset.theme = savedTheme || 'dark'; $('#theme-toggle').textContent = document.body.dataset.theme === 'dark' ? '☀' : '☾';
-loadConfig().then(() => { clearInterval(statusTimer); statusTimer = setInterval(loadStatus, refreshSeconds * 1000); });
-loadEvents(); loadCounts(); loadSystem(); loadStatus(); setInterval(loadSystem, 10000); setInterval(loadCounts, 30000);
+loadConfig();
+loadEvents(); loadCounts(); loadSystem(); pollStatus(); setInterval(loadSystem, 10000); setInterval(loadCounts, 30000);
