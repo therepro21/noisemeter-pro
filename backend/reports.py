@@ -30,7 +30,8 @@ def report_subtitle(kind: str, value: str, start: str, end: str) -> str:
 
 def create_report(path: Path, title: str, kind: str, value: str, start: str, end: str,
                   summary: dict, events: list[dict], site_name: str, site_data: dict | None = None,
-                  breakdown: list[dict] | None = None, logo_path: Path | None = None):
+                  breakdown: list[dict] | None = None, logo_path: Path | None = None,
+                  calibration_graphic: Path | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=1.25 * cm, rightMargin=1.25 * cm,
@@ -70,8 +71,12 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         ["Aufstellort", data.get("location", ""), "Ausrichtung", data.get("orientation", "")],
         ["Zielobjekt", data.get("target_object", ""), "Messmikrofon", data.get("microphone", "")],
         ["Abstand Boden", data.get("ground_distance", ""), "Abstand Wand", data.get("wall_distance", "")],
+        ["Mikrofonwinkel", data.get("calibration_angle", ""), "USB-Pegel", data.get("input_gain", "")],
+        ["Kalibrierdatei", data.get("calibration_file", ""), "Kalibrierstatus", "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"],
     ]
-    detail_table = Table(details, colWidths=[2.4 * cm, 6.25 * cm, 2.4 * cm, content_width - 11.05 * cm])
+    details = [[Paragraph(f"<b>{cell}</b>" if index in (0, 2) else str(cell), normal)
+                for index, cell in enumerate(row)] for row in details]
+    detail_table = Table(details, colWidths=[3.1 * cm, 5.8 * cm, 3.1 * cm, content_width - 12.0 * cm])
     detail_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), PALE), ("BACKGROUND", (2, 0), (2, -1), PALE),
         ("TEXTCOLOR", (0, 0), (-1, -1), NAVY), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
@@ -81,9 +86,9 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     ]))
     story += [detail_table, Spacer(1, 0.24 * cm)]
 
-    statistics = [["Ereignisse", "Maximaler Ereignispegel", "Ø Ereignispegel"],
-                  [str(summary["event_count"]), f"{summary['peak_db']:.1f} dB", f"{summary['average_db']:.1f} dB"]]
-    stats = Table(statistics, colWidths=[content_width / 3] * 3)
+    statistics = [["Ereignisse", "Maximaler Ereignispegel", "Ø Ereignispegel", "Leq"],
+                  [str(summary["event_count"]), f"{summary['peak_db']:.1f} dB", f"{summary['average_db']:.1f} dB", _db(summary.get("leq_db"))]]
+    stats = Table(statistics, colWidths=[content_width / 4] * 4)
     stats.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f5f9fb")), ("TEXTCOLOR", (0, 1), (-1, 1), NAVY),
@@ -94,26 +99,30 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     story += [stats]
 
     if breakdown:
-        rows = [["Zeitabschnitt", "Maximalpegel", "Durchschnittspegel"]] + [
-            [item["label"], f"{item['maximum_db']:.1f} dB", f"{item['average_db']:.1f} dB"] for item in breakdown
+        rows = [["Zeitabschnitt", "Maximalpegel", "Durchschnittspegel", "Leq"]] + [
+            [item["label"], f"{item['maximum_db']:.1f} dB", f"{item['average_db']:.1f} dB", _db(item.get("leq_db"))] for item in breakdown
         ]
-        table = Table(rows, repeatRows=1, colWidths=[content_width * 0.46, content_width * 0.27, content_width * 0.27])
+        table = Table(rows, repeatRows=1, colWidths=[content_width * 0.37, content_width * 0.21, content_width * 0.21, content_width * 0.21])
         table.setStyle(_data_table_style())
         story += [Paragraph("Pegelauswertung", section), table]
 
-    rows = [["Zeitpunkt", "Pegel", "Grenzwert", "Tageszeit", "Dauer"]] + [
-        [event["occurred_at"].replace("T", " "), f"{event['peak_db']:.1f} dB", f"{event['threshold_db']:.1f} dB",
-         event["period_name"], f"{event['duration_seconds']:.1f} s"] for event in events
+    rows = [["Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Tageszeit", "Dauer"]] + [
+        [event["occurred_at"].replace("T", " "), f"{event['peak_db']:.1f} dB", _db(event.get("leq_db")),
+         f"{event['threshold_db']:.1f} dB", event["period_name"], f"{event['duration_seconds']:.1f} s"] for event in events
     ]
     if len(rows) == 1:
-        rows.append(["Keine Ereignisse im gewählten Zeitraum", "", "", "", ""])
-    events_table = Table(rows, repeatRows=1, colWidths=[content_width * x for x in (0.30, 0.15, 0.17, 0.23, 0.15)])
+        rows.append(["Keine Ereignisse im gewählten Zeitraum", "", "", "", "", ""])
+    events_table = Table(rows, repeatRows=1, colWidths=[content_width * x for x in (0.27, 0.13, 0.13, 0.15, 0.19, 0.13)])
     events_table.setStyle(_data_table_style())
     if len(rows) > 1 and events:
         for index, event in enumerate(events, 1):
             row_color = colors.HexColor("#f3e4fb") if event["peak_db"] >= event.get("severe_db", event["threshold_db"] + 15) else colors.HexColor("#ffe5e5") if event["peak_db"] >= event.get("warning_db", event["threshold_db"] + 10) else colors.HexColor("#fff0df")
             events_table.setStyle(TableStyle([("BACKGROUND", (0, index), (-1, index), row_color)]))
     story += [Paragraph("Ereignisliste", section), events_table]
+    if calibration_graphic and calibration_graphic.is_file():
+        graphic = Image(str(calibration_graphic), width=6.2 * cm, height=3.5 * cm)
+        graphic.hAlign = "LEFT"
+        story += [Paragraph("Kalibriergang", section), graphic, Paragraph("Grafik aus dem hochgeladenen Kalibrierpaket", normal)]
     document.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
@@ -124,3 +133,7 @@ def _data_table_style():
         ("TEXTCOLOR", (0, 1), (-1, -1), NAVY), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8dce7")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 3.5),
     ])
+
+
+def _db(value):
+    return f"{float(value):.1f} dB" if value is not None else "-"

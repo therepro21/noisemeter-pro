@@ -6,7 +6,8 @@ import yaml
 
 DEFAULT_CONFIG = {
     "audio": {"device": None, "microphone_name": "", "sample_rate": 48000, "channels": 1, "mp3_bitrate_kbps": 128,
-              "calibration_file": None, "manual_calibration_db": 0.0,
+              "calibration_file": None, "calibration_files": {"0": None, "90": None},
+              "calibration_angle": "0", "calibration_graphic": None, "manual_calibration_db": 0.0,
               "weighting": "A", "time_weighting": "fast",
               "block_seconds": 0.25, "calibration_offset_db": 94.0,
               "pre_roll_seconds": 3, "post_roll_seconds": 5},
@@ -15,7 +16,7 @@ DEFAULT_CONFIG = {
                 "report_dir": "/var/lib/noisemeter/reports"},
     "web": {"host": "0.0.0.0", "port": 8080, "secret_key": "change-me", "refresh_seconds": 5},
     "site_name": "Strassenseite",
-    "site_data": {"location": "", "orientation": "", "target_object": "", "ground_distance": "", "wall_distance": "", "microphone": ""},
+    "site_data": {"location": "", "orientation": "", "target_object": "", "ground_distance": "", "wall_distance": "", "microphone": "", "microphone_angle": "0"},
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
              "username": "", "password": "", "discovery_prefix": "homeassistant",
              "base_topic": "noisemeter"},

@@ -5,6 +5,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import logging
 import zipfile
+import shutil
+import tempfile
 from io import BytesIO
 
 from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
@@ -82,7 +84,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "2.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "2.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "calibration_files", "calibration_angle", "calibration_graphic", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "input_gain": monitor.status()["input_gain"], "calibration": monitor.calibration.metadata(), "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -142,7 +144,12 @@ def create_app(config_path: str):
         name = str((request.get_json(force=True) or {}).get("site_name", "")).strip()
         if not 1 <= len(name) <= 100: abort(400, "Ungültiger Messstellenname")
         payload = request.get_json(force=True) or {}; config["site_name"] = name
+        angle = str(payload.get("microphone_angle", "0"))
+        if angle not in ("0", "90"): abort(400, "Mikrofonausrichtung muss 0 oder 90 Grad sein")
         config["site_data"] = {key: str(payload.get(key, ""))[:100] for key in ("location", "orientation", "target_object", "ground_distance", "wall_distance", "microphone")}
+        config["site_data"]["microphone_angle"] = angle
+        config["audio"]["calibration_angle"] = angle
+        monitor.reload_calibration()
         save_config(config_path, config); return jsonify({"ok": True})
     @app.delete("/api/data")
     def delete_data():
@@ -190,11 +197,22 @@ def create_app(config_path: str):
         uploaded = request.files.get("file")
         if not uploaded or not uploaded.filename: abort(400, "Keine Kalibrierdatei ausgewählt")
         filename = secure_filename(uploaded.filename)
-        if Path(filename).suffix.lower() not in (".txt", ".cal", ".csv"): abort(400, "Erlaubt sind TXT, CAL oder CSV")
+        if Path(filename).suffix.lower() not in (".zip", ".sen", ".txt", ".cal", ".csv"): abort(400, "Erlaubt sind ZIP, SEN, TXT, CAL oder CSV")
         target_dir = Path(config["storage"]["calibration_dir"]); target_dir.mkdir(parents=True, exist_ok=True)
-        uploaded.save(target_dir / filename)
-        config["audio"]["calibration_file"] = filename; monitor.reload_calibration(); save_config(config_path, config)
-        return jsonify({"ok": True, "filename": filename})
+        if Path(filename).suffix.lower() == ".zip":
+            try:
+                bundle = _install_calibration_zip(uploaded.stream, target_dir)
+            except (ValueError, zipfile.BadZipFile) as error:
+                abort(400, str(error))
+            config["audio"]["calibration_files"] = bundle["files"]
+            config["audio"]["calibration_graphic"] = bundle["graphic"]
+            angle = str(config["audio"].get("calibration_angle", "0"))
+            config["audio"]["calibration_file"] = bundle["files"][angle]
+        else:
+            uploaded.save(target_dir / filename)
+            config["audio"]["calibration_file"] = filename
+        monitor.reload_calibration(); save_config(config_path, config)
+        return jsonify({"ok": True, "filename": config["audio"]["calibration_file"], "files": config["audio"].get("calibration_files"), "graphic": config["audio"].get("calibration_graphic")})
     @app.put("/api/config/mqtt")
     def set_mqtt():
         payload = request.get_json(force=True) or {}
@@ -221,8 +239,14 @@ def create_app(config_path: str):
         titles = {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"}
         site_data = dict(config.get("site_data") or {})
         site_data["microphone"] = config["audio"].get("microphone_name") or site_data.get("microphone", "")
+        gain = monitor.status()["input_gain"]
+        site_data["input_gain"] = f"{gain['percent']} % (automatisch gesetzt)" if gain.get("percent") is not None else "Nicht ermittelbar"
+        site_data["calibration_file"] = config["audio"].get("calibration_file") or "Keine"
+        site_data["calibration_angle"] = f"{config['audio'].get('calibration_angle', '0')} Grad"
         logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
-        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo)
+        graphic_name = config["audio"].get("calibration_graphic")
+        graphic = Path(config["storage"]["calibration_dir"]) / graphic_name if graphic_name else None
+        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic)
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):
@@ -232,10 +256,10 @@ def create_app(config_path: str):
         events = database.events(start, end); root = Path(config["storage"]["audio_dir"])
         from openpyxl import Workbook
         workbook = Workbook(); sheet = workbook.active; sheet.title = "Ereignisse"
-        sheet.append(["Zeitpunkt", "Peak dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "MP3-Datei"])
+        sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "MP3-Datei"])
         for event in events:
-            sheet.append([event["occurred_at"], event["peak_db"], event["threshold_db"], event["period_name"], event["duration_seconds"], event["filename"]])
-        for column, width in zip("ABCDEF", (22, 12, 15, 18, 16, 42)): sheet.column_dimensions[column].width = width
+            sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event["filename"]])
+        for column, width in zip("ABCDEFG", (22, 12, 12, 15, 18, 16, 42)): sheet.column_dimensions[column].width = width
         stream = BytesIO(); workbook.save(stream)
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("ereignisse.xlsx", stream.getvalue())
@@ -250,4 +274,39 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = create_app(args.config); app.extensions["monitor"].start()
     app.run(host=app.extensions["nm_config"]["web"]["host"], port=int(app.extensions["nm_config"]["web"]["port"]), threaded=True)
+def _install_calibration_zip(stream, target_dir: Path):
+    """Validate then replace a 0/90-degree SEN calibration bundle."""
+    with zipfile.ZipFile(stream) as archive:
+        members = [item for item in archive.infolist() if not item.is_dir()]
+        if len(members) > 12 or sum(item.file_size for item in members) > 20 * 1024 * 1024:
+            raise ValueError("Kalibrier-ZIP ist zu groß")
+        selected = {}
+        graphic = None
+        for item in members:
+            name = secure_filename(Path(item.filename).name)
+            lower = name.lower()
+            if lower.endswith(".sen") and "_00d" in lower:
+                selected["0"] = (item, name)
+            elif lower.endswith(".sen") and "_90d" in lower:
+                selected["90"] = (item, name)
+            elif Path(lower).suffix in (".png", ".jpg", ".jpeg", ".webp") and graphic is None:
+                graphic = (item, name)
+        if set(selected) != {"0", "90"} or graphic is None:
+            raise ValueError("ZIP muss je eine *_00d.sen-, *_90d.sen- und eine Bilddatei enthalten")
+        with tempfile.TemporaryDirectory(dir=target_dir.parent) as temporary:
+            temp = Path(temporary)
+            for item, name in [*selected.values(), graphic]:
+                with archive.open(item) as source, (temp / name).open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+            from .calibration import CalibrationProfile
+            for item, name in selected.values():
+                profile = CalibrationProfile(); profile.load(str(temp / name))
+                if not profile.loaded:
+                    raise ValueError(f"{name} enthält keine gültige SEN-Frequenztabelle")
+            for existing in target_dir.iterdir():
+                if existing.is_file(): existing.unlink()
+            for source in temp.iterdir(): shutil.move(str(source), target_dir / source.name)
+    return {"files": {angle: value[1] for angle, value in selected.items()}, "graphic": graphic[1]}
+
+
 if __name__ == "__main__": main()

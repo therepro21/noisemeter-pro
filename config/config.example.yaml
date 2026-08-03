@@ -10,6 +10,9 @@ audio:
   post_roll_seconds: 5
   mp3_bitrate_kbps: 128        # CBR: 64, 96, 128, 192, 256 oder 320 kbit/s
   calibration_file: null       # im Webinterface hochladen, z. B. UMIK-2 / MM-2USB
+  calibration_files: {"0": null, "90": null} # beide SEN-Dateien aus dem ZIP
+  calibration_angle: "0"       # Mikrofon zur Schallquelle: 0 oder 90 Grad
+  calibration_graphic: null    # Grafik aus dem Kalibrier-ZIP
   manual_calibration_db: 0.0   # zusätzliche manuelle Korrektur in dB
   weighting: A                 # A (dBA) oder C (dBC)
   time_weighting: fast         # fast (125 ms) oder slow (1 s)

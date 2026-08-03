@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -26,8 +27,10 @@ class NoiseMonitor:
         self.pre_blocks = max(1, round(float(audio["pre_roll_seconds"]) * self.rate / self.blocksize))
         self.post_blocks = max(1, round(float(audio["post_roll_seconds"]) * self.rate / self.blocksize))
         self.ring = deque(maxlen=self.pre_blocks)
+        self.energy_ring = deque(maxlen=self.pre_blocks)
         self.samples = queue.Queue(maxsize=64)
         self.current_db, self.last_update, self.running = 0.0, None, False
+        self.current_uncalibrated_db, self.current_leq_db = 0.0, None
         self.device_available, self.device_error = False, None
         self.lock = threading.Lock()
         self.thread = None
@@ -36,17 +39,26 @@ class NoiseMonitor:
         self.on_measurement = None
         self.last_retention_check = None
         self.smoothed_energy = None
+        self.smoothed_uncalibrated_energy = None
+        self.leq_window = deque(maxlen=max(1, round(60 / float(audio["block_seconds"]))))
+        self.measurement_energy, self.measurement_blocks = 0.0, 0
+        self.input_gain = {"percent": None, "enforced": False, "control": None, "card": None, "error": None}
         self.calibration = CalibrationProfile()
         self.reload_calibration()
 
     def reload_calibration(self):
-        filename = self.config["audio"].get("calibration_file")
+        audio = self.config["audio"]
+        angle = str(audio.get("calibration_angle", "0"))
+        filename = (audio.get("calibration_files") or {}).get(angle) or audio.get("calibration_file")
+        audio["calibration_file"] = filename
         path = Path(self.config["storage"]["calibration_dir"]) / filename if filename else None
         self.calibration.load(str(path) if path else None)
         LOG.info("Loaded calibration profile: %s", filename or "none")
 
     def reset_measurement_response(self):
         self.smoothed_energy = None
+        self.smoothed_uncalibrated_energy = None
+        self.leq_window.clear()
 
     def start(self):
         if self.running: return
@@ -64,6 +76,9 @@ class NoiseMonitor:
     def status(self):
         with self.lock:
             return {"db": round(self.current_db, 1) if self.device_available else None,
+                    "uncalibrated_db": round(self.current_uncalibrated_db, 1) if self.device_available else None,
+                    "leq_db": round(self.current_leq_db, 1) if self.device_available and self.current_leq_db is not None else None,
+                    "calibration": self.calibration.metadata(), "input_gain": self.input_gain,
                     "available": self.device_available, "error": self.device_error,
                     "updated_at": self.last_update,
                     "recording": self.recording is not None, "device": self.config["audio"]["device"]}
@@ -88,13 +103,21 @@ class NoiseMonitor:
         try: self.samples.put_nowait(indata.copy())
         except queue.Full: LOG.warning("Audio queue full; dropping a block")
 
-    def _db(self, block):
-        rms = self.calibration.weighted_rms(block, self.rate, self.config["audio"].get("weighting", "A"))
-        energy = rms * rms
+    def _levels(self, block):
+        weighting = self.config["audio"].get("weighting", "A")
+        rms = self.calibration.weighted_rms(block, self.rate, weighting, calibrated=True)
+        uncalibrated_rms = self.calibration.weighted_rms(block, self.rate, weighting, calibrated=False)
+        energy, uncalibrated_energy = rms * rms, uncalibrated_rms * uncalibrated_rms
         time_constant = 0.125 if self.config["audio"].get("time_weighting", "fast") == "fast" else 1.0
         alpha = np.exp(-(len(block) / self.rate) / time_constant)
         self.smoothed_energy = energy if self.smoothed_energy is None else alpha * self.smoothed_energy + (1 - alpha) * energy
-        return float(self.config["audio"]["calibration_offset_db"]) + float(self.config["audio"].get("manual_calibration_db", 0)) + 10 * np.log10(max(self.smoothed_energy, 1e-24))
+        self.smoothed_uncalibrated_energy = uncalibrated_energy if self.smoothed_uncalibrated_energy is None else alpha * self.smoothed_uncalibrated_energy + (1 - alpha) * uncalibrated_energy
+        base = self.calibration.spl_offset(float(self.config["audio"]["calibration_offset_db"]))
+        manual = float(self.config["audio"].get("manual_calibration_db", 0))
+        db_value = base + manual + 10 * np.log10(max(self.smoothed_energy, 1e-24))
+        uncalibrated_db = float(self.config["audio"]["calibration_offset_db"]) + 10 * np.log10(max(self.smoothed_uncalibrated_energy, 1e-24))
+        block_leq = base + manual + 10 * np.log10(max(energy, 1e-24))
+        return db_value, uncalibrated_db, block_leq
 
     def _active_period(self, now):
         current = now.strftime("%H:%M")
@@ -108,6 +131,7 @@ class NoiseMonitor:
     def _run(self):
         audio = self.config["audio"]
         try:
+            self.input_gain = self._set_input_gain_100()
             with sd.InputStream(device=audio.get("device"), samplerate=self.rate, channels=self.channels,
                                 blocksize=self.blocksize, dtype="float32", callback=self._callback):
                 with self.lock:
@@ -129,24 +153,37 @@ class NoiseMonitor:
         if self.last_retention_check != now.date():
             self._apply_retention(now)
             self.last_retention_check = now.date()
-        db_value = self._db(block)
+        db_value, uncalibrated_db, block_leq = self._levels(block)
+        block_energy = 10 ** (block_leq / 10)
+        self.leq_window.append(block_energy)
+        self.measurement_energy += block_energy
+        self.measurement_blocks += 1
+        live_leq = 10 * np.log10(sum(self.leq_window) / len(self.leq_window))
         with self.lock:
-            self.current_db, self.last_update = db_value, now.isoformat(timespec="seconds")
+            self.current_db, self.current_uncalibrated_db, self.current_leq_db = db_value, uncalibrated_db, live_leq
+            self.last_update = now.isoformat(timespec="seconds")
         self.ring.append(block)
+        self.energy_ring.append(block_energy)
         if time.monotonic() - self.last_measurement >= 1:
-            self.database.add_measurement(now.isoformat(timespec="seconds"), db_value)
+            interval_leq = 10 * np.log10(self.measurement_energy / max(self.measurement_blocks, 1))
+            self.database.add_measurement(now.isoformat(timespec="seconds"), db_value, interval_leq)
             if self.on_measurement:
-                self.on_measurement(now.isoformat(timespec="seconds"), db_value)
+                self.on_measurement(now.isoformat(timespec="seconds"), db_value, interval_leq)
+            self.measurement_energy, self.measurement_blocks = 0.0, 0
             self.last_measurement = time.monotonic()
         if self.recording:
             self.recording["blocks"].append(block)
             self.recording["peak"] = max(self.recording["peak"], db_value)
+            self.recording["energy"] += block_energy
+            self.recording["energy_blocks"] += 1
             self.recording["remaining"] -= 1
             if self.recording["remaining"] <= 0: self._finish_recording()
             return
         period = self._active_period(now)
         if period and db_value >= float(period["threshold_db"]):
+            pre_energy = sum(self.energy_ring)
             self.recording = {"blocks": list(self.ring), "remaining": self.post_blocks, "peak": db_value,
+                              "energy": pre_energy, "energy_blocks": len(self.energy_ring),
                               "started": now, "period": period}
             LOG.info("Event started: %.1f dB (%s)", db_value, period["name"])
 
@@ -166,7 +203,8 @@ class NoiseMonitor:
             subprocess.run(command, input=raw.astype("float32").tobytes(), check=True, capture_output=True, timeout=30)
             self.database.add_event({"occurred_at": started.isoformat(timespec="seconds"), "peak_db": record["peak"],
                 "threshold_db": float(record["period"]["threshold_db"]), "period_name": record["period"]["name"],
-                "filename": relative.as_posix(), "duration_seconds": round(len(raw) / self.rate, 2)})
+                "filename": relative.as_posix(), "duration_seconds": round(len(raw) / self.rate, 2),
+                "leq_db": 10 * np.log10(record["energy"] / max(record["energy_blocks"], 1))})
             LOG.info("Event saved: %s", target)
         except Exception:
             LOG.exception("Could not encode event audio")
@@ -183,3 +221,26 @@ class NoiseMonitor:
                 try: target.unlink(missing_ok=True)
                 except OSError: LOG.warning("Could not remove expired audio: %s", target)
         LOG.info("Applied %d-day audio retention", days)
+
+    def _set_input_gain_100(self):
+        """Best-effort ALSA capture-gain enforcement for calibrated USB microphones."""
+        result = {"percent": None, "enforced": False, "control": None, "card": None, "error": None}
+        try:
+            cards = subprocess.run(["arecord", "-l"], capture_output=True, text=True, timeout=5, check=True).stdout
+            card_ids = re.findall(r"card\s+(\d+):[^\n]*USB", cards, re.I) or re.findall(r"card\s+(\d+):", cards, re.I)
+            for card in card_ids:
+                controls = subprocess.run(["amixer", "-c", card, "scontrols"], capture_output=True, text=True, timeout=5, check=True).stdout
+                names = re.findall(r"Simple mixer control '([^']+)'", controls)
+                for control in sorted(names, key=lambda name: 0 if re.search(r"capture|mic|input", name, re.I) else 1):
+                    changed = subprocess.run(["amixer", "-c", card, "sset", control, "100%", "cap", "unmute"], capture_output=True, text=True, timeout=5)
+                    if changed.returncode != 0:
+                        continue
+                    state = subprocess.run(["amixer", "-c", card, "sget", control], capture_output=True, text=True, timeout=5, check=True).stdout
+                    percentages = [int(value) for value in re.findall(r"\[(\d+)%\]", state)]
+                    if percentages:
+                        result.update(percent=min(percentages), enforced=all(value == 100 for value in percentages), control=control, card=int(card))
+                        return result
+            result["error"] = "Kein regelbarer ALSA-Aufnahmepegel gefunden"
+        except Exception as error:
+            result["error"] = str(error)
+        return result

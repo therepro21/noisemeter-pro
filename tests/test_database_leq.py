@@ -1,0 +1,29 @@
+import math
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+
+from backend.database import Database
+
+
+class DatabaseLeqTest(unittest.TestCase):
+    def test_energy_average_and_legacy_migration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "legacy.sqlite3"
+            db = sqlite3.connect(path)
+            try:
+                db.execute("CREATE TABLE measurements (id INTEGER PRIMARY KEY, recorded_at TEXT NOT NULL, db REAL NOT NULL)")
+                db.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL, peak_db REAL NOT NULL, threshold_db REAL NOT NULL, period_name TEXT NOT NULL, filename TEXT NOT NULL UNIQUE, duration_seconds REAL NOT NULL)")
+                db.commit()
+            finally:
+                db.close()
+            database = Database(str(path))
+            database.add_measurement("2026-08-01T10:00:00", 50.0, 50.0)
+            database.add_measurement("2026-08-01T10:00:01", 70.0, 70.0)
+            expected = 10 * math.log10((10 ** 5 + 10 ** 7) / 2)
+            actual = database.summary("2026-08-01", "2026-08-02")["leq_db"]
+            self.assertAlmostEqual(actual, expected)
+
+
+if __name__ == "__main__": unittest.main()

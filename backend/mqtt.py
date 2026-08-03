@@ -45,6 +45,7 @@ class MqttPublisher:
         device = {"identifiers": ["noisemeter_pro"], "name": "NoiseMeter Pro", "manufacturer": "therepro21", "model": "NoiseMeter Pro"}
         sensors = [
             ("current_db", "Aktueller Schallpegel", "dB", "measurement"),
+            ("current_leq_db", "LAeq 60 Sekunden", "dB", "measurement"),
             ("daily_peak_db", "Tageshöchstwert", "dB", "measurement"),
             ("weekly_peak_db", "Wochenhöchstwert", "dB", "measurement"),
             ("monthly_peak_db", "Monatshöchstwert", "dB", "measurement"),
@@ -54,12 +55,13 @@ class MqttPublisher:
             payload = {"name": name, "unique_id": f"noisemeter_pro_{object_id}", "state_topic": f"{self.topic}/{object_id}/state", "unit_of_measurement": unit, "state_class": state_class, "device_class": "sound_pressure", "device": device}
             client.publish(f"{prefix}/sensor/noisemeter_pro/{object_id}/config", json.dumps(payload), retain=True)
 
-    def publish_measurement(self, timestamp: str, db_value: float):
+    def publish_measurement(self, timestamp: str, db_value: float, leq_db: float):
         if not self.client:
             return
         now = time.monotonic()
         if now - self.last_current >= 5:
             self.client.publish(f"{self.topic}/current_db/state", f"{db_value:.1f}", retain=True)
+            self.client.publish(f"{self.topic}/current_leq_db/state", f"{leq_db:.1f}", retain=True)
             self.last_current = now
         if now - self.last_peaks >= 60:
             today = date.fromisoformat(timestamp[:10])

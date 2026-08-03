@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import sqlite3
+import math
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import date, timedelta
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS measurements (
- id INTEGER PRIMARY KEY, recorded_at TEXT NOT NULL, db REAL NOT NULL
+ id INTEGER PRIMARY KEY, recorded_at TEXT NOT NULL, db REAL NOT NULL, leq_db REAL
 );
 CREATE INDEX IF NOT EXISTS idx_measurements_time ON measurements(recorded_at);
 CREATE TABLE IF NOT EXISTS events (
  id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL, peak_db REAL NOT NULL,
  threshold_db REAL NOT NULL, period_name TEXT NOT NULL, filename TEXT NOT NULL UNIQUE,
- duration_seconds REAL NOT NULL
+ duration_seconds REAL NOT NULL, leq_db REAL
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
@@ -24,10 +25,18 @@ class Database:
         self.path = path
         with self.connection() as db:
             db.executescript(SCHEMA)
+            self._add_column(db, "measurements", "leq_db", "REAL")
+            self._add_column(db, "events", "leq_db", "REAL")
+
+    @staticmethod
+    def _add_column(db, table, column, definition):
+        if column not in {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)
         db.row_factory = sqlite3.Row
+        db.create_aggregate("LEQ", 1, LeqAggregate)
         return db
 
     @contextmanager
@@ -39,14 +48,14 @@ class Database:
         finally:
             db.close()
 
-    def add_measurement(self, timestamp: str, db_value: float):
+    def add_measurement(self, timestamp: str, db_value: float, leq_db: float):
         with self.connection() as db:
-            db.execute("INSERT INTO measurements(recorded_at, db) VALUES (?, ?)", (timestamp, db_value))
+            db.execute("INSERT INTO measurements(recorded_at, db, leq_db) VALUES (?, ?, ?)", (timestamp, db_value, leq_db))
 
     def add_event(self, event: dict):
         with self.connection() as db:
-            db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds)
-                VALUES (:occurred_at,:peak_db,:threshold_db,:period_name,:filename,:duration_seconds)""", event)
+            db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds, leq_db)
+                VALUES (:occurred_at,:peak_db,:threshold_db,:period_name,:filename,:duration_seconds,:leq_db)""", event)
 
     def events(self, start: str, end: str):
         with self.connection() as db:
@@ -54,8 +63,12 @@ class Database:
 
     def summary(self, start: str, end: str):
         with self.connection() as db:
-            return dict(db.execute("""SELECT COUNT(*) event_count, COALESCE(MAX(peak_db),0) peak_db,
+            event_summary = dict(db.execute("""SELECT COUNT(*) event_count, COALESCE(MAX(peak_db),0) peak_db,
               COALESCE(AVG(peak_db),0) average_db FROM events WHERE occurred_at >= ? AND occurred_at < ?""", (start, end)).fetchone())
+            event_summary["leq_db"] = db.execute(
+                "SELECT LEQ(leq_db) value FROM measurements WHERE recorded_at >= ? AND recorded_at < ?", (start, end)
+            ).fetchone()["value"]
+            return event_summary
 
     def level_peak(self, start: str, end: str) -> float:
         """Highest actual measured level, independent of recorded events."""
@@ -67,7 +80,7 @@ class Database:
         """One maximum per five minutes keeps the web chart compact."""
         with self.connection() as db:
             return [dict(row) for row in db.execute("""
-                SELECT substr(recorded_at, 1, 14) || printf('%02d', CAST(substr(recorded_at, 15, 2) AS INTEGER) / 5 * 5) AS minute, MAX(db) AS db
+                SELECT substr(recorded_at, 1, 14) || printf('%02d', CAST(substr(recorded_at, 15, 2) AS INTEGER) / 5 * 5) AS minute, MAX(db) AS db, LEQ(leq_db) AS leq_db
                 FROM measurements
                 WHERE recorded_at >= ? AND recorded_at < ?
                 GROUP BY substr(recorded_at, 1, 14), CAST(substr(recorded_at, 15, 2) AS INTEGER) / 5
@@ -77,7 +90,7 @@ class Database:
     def level_breakdown(self, kind: str, start: str, end: str):
         grouping = {"day": "substr(recorded_at,12,2) || ':00'", "week": "substr(recorded_at,1,10)", "month": "strftime('%Y-W%W', recorded_at)", "year": "substr(recorded_at,1,7)"}[kind]
         with self.connection() as db:
-            return [dict(row) for row in db.execute(f"SELECT {grouping} label, MAX(db) maximum_db, AVG(db) average_db FROM measurements WHERE recorded_at >= ? AND recorded_at < ? GROUP BY {grouping} ORDER BY label", (start, end))]
+            return [dict(row) for row in db.execute(f"SELECT {grouping} label, MAX(db) maximum_db, AVG(db) average_db, LEQ(leq_db) leq_db FROM measurements WHERE recorded_at >= ? AND recorded_at < ? GROUP BY {grouping} ORDER BY label", (start, end))]
 
     def period_statistics(self, selected_day: date, periods: list[dict]):
         """Measurement and event statistics for each configured clock-time period."""
@@ -96,7 +109,7 @@ class Database:
                     params = (period_start, period_end)
                 levels = db.execute(
                     f"""SELECT COUNT(*) measurement_count, MIN(db) minimum_db,
-                        MAX(db) maximum_db, AVG(db) average_db FROM measurements
+                        MAX(db) maximum_db, AVG(db) average_db, LEQ(leq_db) leq_db FROM measurements
                         WHERE recorded_at >= ? AND recorded_at < ? AND {measurement_time}""",
                     (start, end, *params),
                 ).fetchone()
@@ -108,7 +121,7 @@ class Database:
                     "name": period["name"], "start": period_start, "end": period_end,
                     "event_count": event_count, "measurement_count": levels["measurement_count"],
                     "minimum_db": levels["minimum_db"], "maximum_db": levels["maximum_db"],
-                    "average_db": levels["average_db"],
+                    "average_db": levels["average_db"], "leq_db": levels["leq_db"],
                 })
         return result
 
@@ -133,3 +146,18 @@ class Database:
             files = [row["filename"] for row in db.execute("SELECT filename FROM events WHERE occurred_at < ?", (timestamp,))]
             db.execute("DELETE FROM events WHERE occurred_at < ?", (timestamp,))
             return files
+
+
+class LeqAggregate:
+    """Energy-equivalent mean of equally spaced decibel samples."""
+    def __init__(self):
+        self.energy = 0.0
+        self.count = 0
+
+    def step(self, value):
+        if value is not None and math.isfinite(float(value)):
+            self.energy += 10 ** (float(value) / 10)
+            self.count += 1
+
+    def finalize(self):
+        return 10 * math.log10(self.energy / self.count) if self.count else None
