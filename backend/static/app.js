@@ -26,10 +26,13 @@ function periodValue() {
   return `${current.getFullYear()}-W${pad(Math.ceil((((current - first) / 86400000) + 1) / 7))}`;
 }
 function setTitle() {
+  const isToday = localDay(selected) === localDay(new Date());
   $('#title').textContent = ({day:'Tagesübersicht', week:'Wochenübersicht', month:'Monatsübersicht', year:'Jahresübersicht'})[kind];
   $('#count-label').textContent = ({day:'Ereignisse am Tag', week:'Ereignisse der Woche', month:'Ereignisse des Monats', year:'Ereignisse des Jahres'})[kind];
   $('#date').value = localDay(selected); $('#pdf').href = `/report/${kind}/${periodValue()}.pdf`; $('#backup').href = `/backup/${kind}/${periodValue()}.zip`;
   $('#history-date').textContent = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }).format(selected);
+  $('#history-panel').classList.toggle('historical', !isToday);
+  $('#current').classList.toggle('is-current', isToday && kind === 'day');
   $('#period-section').hidden = kind !== 'day';
   $$('[data-kind]').forEach(button => button.classList.toggle('active', button.dataset.kind === kind));
 }
@@ -127,6 +130,7 @@ $('#save-refresh').onclick = async event => { event.preventDefault(); try { awai
 $('#save-mqtt').onclick = async event => { event.preventDefault(); const body = {enabled:$('#mqtt-enabled').checked, host:$('#mqtt-host').value, port:+$('#mqtt-port').value, username:$('#mqtt-user').value, password:$('#mqtt-password').value, discovery_prefix:$('#mqtt-discovery').value, base_topic:$('#mqtt-topic').value}; try { await api('/api/config/mqtt', json('PUT', body)); $('#mqtt-dialog').close(); toast('MQTT-Einstellungen gespeichert.'); } catch (_) { toast('MQTT-Einstellungen sind ungültig.', true); } };
 $('#delete-data').onclick = async event => { event.preventDefault(); const from = $('#delete-from').value, to = $('#delete-to').value; if (!from || !to || !$('#delete-confirm').checked) return toast('Bitte Zeitraum und Löschbestätigung angeben.', true); if (!confirm(`Alle Messdaten vom ${from} bis einschließlich ${to} dauerhaft löschen?`)) return; try { const result = await api('/api/data', json('DELETE', {from, to})); $('#delete-dialog').close(); $('#delete-confirm').checked = false; await Promise.all([loadEvents(), loadCounts()]); toast(`${result.measurements} Messwerte, ${result.events} Ereignisse und ${result.audio_files} Audiodateien gelöscht.`); } catch (_) { toast('Daten konnten nicht gelöscht werden.', true); } };
 $$('[data-kind]').forEach(button => button.onclick = () => { kind = button.dataset.kind; loadEvents(); });
+$('#current').onclick = () => { selected = new Date(); kind = 'day'; loadEvents(); };
 $('#date').onchange = event => { selected = new Date(`${event.target.value}T12:00:00`); loadEvents(); };
 function move(direction) { if (kind === 'day') selected.setDate(selected.getDate() + direction); else if (kind === 'week') selected.setDate(selected.getDate() + 7 * direction); else if (kind === 'month') selected.setMonth(selected.getMonth() + direction); else selected.setFullYear(selected.getFullYear() + direction); loadEvents(); }
 $('#previous').onclick = () => move(-1); $('#next').onclick = () => move(1);
