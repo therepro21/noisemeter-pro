@@ -316,7 +316,7 @@ def _install_calibration_zip(stream, target_dir: Path):
                 selected["0"] = (item, name)
             elif lower.endswith(".sen") and "_90d" in lower:
                 selected["90"] = (item, name)
-            elif Path(lower).suffix in (".png", ".jpg", ".jpeg", ".webp") and graphic is None:
+            elif Path(lower).suffix in (".png", ".jpg", ".jpeg", ".webp", ".gif") and graphic is None:
                 graphic = (item, name)
         if set(selected) != {"0", "90"} or graphic is None:
             raise ValueError("ZIP muss je eine *_00d.sen-, *_90d.sen- und eine Bilddatei enthalten")

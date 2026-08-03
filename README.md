@@ -62,7 +62,7 @@ Das Webinterface akzeptiert ein ZIP-Kalibrierpaket mit drei Dateien:
 
 - `MM2USB..._00d.sen` für 0° frontal zur Schallquelle
 - `MM2USB..._90d.sen` für 90° seitlich zur Schallquelle
-- eine PNG-, JPG-, JPEG- oder WebP-Grafik des Kalibriergangs
+- eine PNG-, JPG-, JPEG-, WebP- oder GIF-Grafik des Kalibriergangs
 
 Beide SEN-Profile und die Grafik werden gespeichert. Unter **Messstellendaten** wird der Mikrofonwinkel 0° oder 90° gewählt; NoiseMeter Pro aktiviert sofort das passende Profil. Erst ein neu hochgeladenes Kalibrierpaket ersetzt die alten Dateien. Die Grafik erscheint verkleinert im PDF-Bericht.
 

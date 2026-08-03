@@ -52,13 +52,18 @@ class NoiseMonitor:
         filename = (audio.get("calibration_files") or {}).get(angle) or audio.get("calibration_file")
         audio["calibration_file"] = filename
         path = Path(self.config["storage"]["calibration_dir"]) / filename if filename else None
-        self.calibration.load(str(path) if path else None)
+        # Build completely before swapping so the audio thread never sees a half-loaded profile.
+        profile = CalibrationProfile()
+        profile.load(str(path) if path else None)
+        self.calibration = profile
+        self.reset_measurement_response()
         LOG.info("Loaded calibration profile: %s", filename or "none")
 
     def reset_measurement_response(self):
         self.smoothed_energy = None
         self.smoothed_uncalibrated_energy = None
         self.leq_window.clear()
+        self.measurement_energy, self.measurement_blocks = 0.0, 0
 
     def start(self):
         if self.running: return
@@ -105,14 +110,14 @@ class NoiseMonitor:
 
     def _levels(self, block):
         weighting = self.config["audio"].get("weighting", "A")
-        rms = self.calibration.weighted_rms(block, self.rate, weighting, calibrated=True)
-        uncalibrated_rms = self.calibration.weighted_rms(block, self.rate, weighting, calibrated=False)
+        profile = self.calibration
+        rms, uncalibrated_rms = profile.weighted_rms_pair(block, self.rate, weighting)
         energy, uncalibrated_energy = rms * rms, uncalibrated_rms * uncalibrated_rms
         time_constant = 0.125 if self.config["audio"].get("time_weighting", "fast") == "fast" else 1.0
         alpha = np.exp(-(len(block) / self.rate) / time_constant)
         self.smoothed_energy = energy if self.smoothed_energy is None else alpha * self.smoothed_energy + (1 - alpha) * energy
         self.smoothed_uncalibrated_energy = uncalibrated_energy if self.smoothed_uncalibrated_energy is None else alpha * self.smoothed_uncalibrated_energy + (1 - alpha) * uncalibrated_energy
-        base = self.calibration.spl_offset(float(self.config["audio"]["calibration_offset_db"]))
+        base = profile.spl_offset(float(self.config["audio"]["calibration_offset_db"]))
         manual = float(self.config["audio"].get("manual_calibration_db", 0))
         db_value = base + manual + 10 * np.log10(max(self.smoothed_energy, 1e-24))
         uncalibrated_db = float(self.config["audio"]["calibration_offset_db"]) + 10 * np.log10(max(self.smoothed_uncalibrated_energy, 1e-24))

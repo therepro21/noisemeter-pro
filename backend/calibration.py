@@ -21,6 +21,7 @@ class CalibrationProfile:
         self.db_offset = None
         self.title = ""
         self.path = None
+        self._gain_cache = {}
 
     @property
     def loaded(self):
@@ -69,14 +70,48 @@ class CalibrationProfile:
             self.corrections = np.array(list(unique.values()), dtype=float)
 
     def weighted_rms(self, samples: np.ndarray, rate: int, weighting: str, calibrated: bool = True) -> float:
+        """Frequency-weighted RMS using Parseval's theorem without an inverse FFT."""
         mono = samples[:, 0] if samples.ndim > 1 else samples
         spectrum = np.fft.rfft(mono)
-        frequencies = np.fft.rfftfreq(len(mono), d=1 / rate)
-        correction = np.interp(frequencies, self.frequencies, self.corrections,
-                               left=self.corrections[0], right=self.corrections[-1]) if calibrated and self.loaded else 0
-        frequency_weight = self._frequency_weight(frequencies, weighting)
-        corrected = np.fft.irfft(spectrum * np.power(10, (correction + frequency_weight) / 20), n=len(mono))
-        return float(np.sqrt(np.mean(np.square(corrected.astype(np.float64)))))
+        return self._spectrum_rms(spectrum, self._gain(len(mono), rate, weighting, calibrated), len(mono))
+
+    def weighted_rms_pair(self, samples: np.ndarray, rate: int, weighting: str) -> tuple[float, float]:
+        """Return calibrated and raw-microphone weighted RMS from a single FFT."""
+        mono = samples[:, 0] if samples.ndim > 1 else samples
+        spectrum = np.fft.rfft(mono)
+        length = len(mono)
+        calibrated = self._spectrum_rms(spectrum, self._gain(length, rate, weighting, True), length)
+        uncalibrated = self._spectrum_rms(spectrum, self._gain(length, rate, weighting, False), length)
+        return calibrated, uncalibrated
+
+    def _gain(self, length: int, rate: int, weighting: str, calibrated: bool) -> np.ndarray:
+        key = (length, rate, weighting.upper(), calibrated)
+        cached = self._gain_cache.get(key)
+        if cached is not None:
+            return cached
+        frequencies = np.fft.rfftfreq(length, d=1 / rate)
+        correction = 0.0
+        if calibrated and self.loaded:
+            # SEN specifies logarithmic interpolation between its frequency points.
+            safe_frequencies = np.maximum(frequencies, self.frequencies[0])
+            correction = np.interp(
+                np.log10(safe_frequencies), np.log10(self.frequencies), self.corrections,
+                left=self.corrections[0], right=self.corrections[-1],
+            )
+        gain = np.power(10.0, (correction + self._frequency_weight(frequencies, weighting)) / 20.0)
+        self._gain_cache[key] = gain
+        return gain
+
+    @staticmethod
+    def _spectrum_rms(spectrum: np.ndarray, gain: np.ndarray, length: int) -> float:
+        power = np.square(np.abs(spectrum * gain), dtype=np.float64)
+        if len(power) == 1:
+            total = power[0]
+        elif length % 2 == 0:
+            total = power[0] + power[-1] + 2.0 * np.sum(power[1:-1])
+        else:
+            total = power[0] + 2.0 * np.sum(power[1:])
+        return float(np.sqrt(total) / length)
 
     def metadata(self):
         return {"loaded": self.loaded, "filename": Path(self.path).name if self.path else None,
