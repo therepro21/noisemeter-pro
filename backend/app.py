@@ -4,6 +4,7 @@ import argparse
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import logging
+import signal
 import zipfile
 import shutil
 import tempfile
@@ -178,6 +179,7 @@ def create_app(config_path: str):
         except (KeyError, TypeError, ValueError): abort(400, "Ungültiger Löschzeitraum")
         if start_date > end_date: abort(400, "Das Von-Datum muss vor dem Bis-Datum liegen")
         start, end = start_date.isoformat(), (end_date + timedelta(days=1)).isoformat()
+        monitor.flush_measurements()
         deleted = database.delete_range(start, end)
         root = Path(config["storage"]["audio_dir"]).resolve()
         removed_files = 0
@@ -299,8 +301,15 @@ def create_app(config_path: str):
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument("--config", default="/etc/noisemeter/config.yaml"); args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    app = create_app(args.config); app.extensions["monitor"].start()
-    app.run(host=app.extensions["nm_config"]["web"]["host"], port=int(app.extensions["nm_config"]["web"]["port"]), threaded=True)
+    app = create_app(args.config); monitor = app.extensions["monitor"]; monitor.start()
+    def stop_service(signum, frame):
+        monitor.stop()
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, stop_service)
+    try:
+        app.run(host=app.extensions["nm_config"]["web"]["host"], port=int(app.extensions["nm_config"]["web"]["port"]), threaded=True)
+    finally:
+        monitor.stop()
 def _install_calibration_zip(stream, target_dir: Path):
     """Validate then replace a 0/90-degree SEN calibration bundle."""
     with zipfile.ZipFile(stream) as archive:

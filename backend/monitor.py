@@ -42,6 +42,8 @@ class NoiseMonitor:
         self.smoothed_uncalibrated_energy = None
         self.leq_window = deque(maxlen=max(1, round(60 / float(audio["block_seconds"]))))
         self.measurement_energy, self.measurement_blocks = 0.0, 0
+        self.measurement_buffer, self.measurement_buffer_minute = [], None
+        self.measurement_buffer_lock = threading.RLock()
         self.input_gain = {"percent": None, "channels": [], "enforced": False, "control": None, "card": None, "error": None}
         self.calibration = CalibrationProfile()
         self.reload_calibration()
@@ -77,6 +79,28 @@ class NoiseMonitor:
     def stop(self):
         self.running = False
         if self.thread: self.thread.join(timeout=3)
+        self.flush_measurements()
+
+    def flush_measurements(self):
+        """Write buffered second values as one transaction; safe before deletes and shutdown."""
+        with self.measurement_buffer_lock:
+            if not self.measurement_buffer:
+                return
+            buffered = list(self.measurement_buffer)
+            try:
+                self.database.add_measurements(buffered)
+            except Exception:
+                LOG.exception("Could not flush %d buffered measurements", len(buffered))
+                return
+            del self.measurement_buffer[:len(buffered)]
+
+    def _buffer_measurement(self, timestamp: str, db_value: float, leq_db: float):
+        with self.measurement_buffer_lock:
+            minute = timestamp[:16]
+            if self.measurement_buffer and minute != self.measurement_buffer_minute:
+                self.flush_measurements()
+            self.measurement_buffer.append((timestamp, db_value, leq_db))
+            self.measurement_buffer_minute = minute
 
     def status(self):
         with self.lock:
@@ -152,6 +176,8 @@ class NoiseMonitor:
                 self.current_db, self.last_update, self.recording = 0.0, None, None
             LOG.exception("Audio monitor stopped due to input error")
             self.running = False
+        finally:
+            self.flush_measurements()
 
     def _process(self, block):
         now = datetime.now()
@@ -171,9 +197,10 @@ class NoiseMonitor:
         self.energy_ring.append(block_energy)
         if time.monotonic() - self.last_measurement >= 1:
             interval_leq = 10 * np.log10(self.measurement_energy / max(self.measurement_blocks, 1))
-            self.database.add_measurement(now.isoformat(timespec="seconds"), db_value, interval_leq)
+            timestamp = now.isoformat(timespec="seconds")
+            self._buffer_measurement(timestamp, db_value, interval_leq)
             if self.on_measurement:
-                self.on_measurement(now.isoformat(timespec="seconds"), db_value, interval_leq)
+                self.on_measurement(timestamp, db_value, interval_leq)
             self.measurement_energy, self.measurement_blocks = 0.0, 0
             self.last_measurement = time.monotonic()
         if self.recording:

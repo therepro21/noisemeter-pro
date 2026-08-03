@@ -94,6 +94,8 @@ Fehlmessungen können unter **Einstellungen → Messdaten löschen** vollständi
 
 Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`, die Datenbank in `/var/lib/noisemeter/noisemeter.sqlite3` und die Konfiguration in `/etc/noisemeter/config.yaml`.
 
+Zur Schonung der microSD-Karte hält NoiseMeter Pro die Sekundenmesswerte der laufenden Minute im RAM und schreibt sie beim Minutenwechsel gesammelt in einer SQLite-Transaktion. Bei einem abrupten Stromausfall können dadurch höchstens die noch nicht geschriebenen Werte der aktuellen Minute fehlen. Ereignis-Audioblöcke werden bereits während der Aufnahme im RAM gehalten; nach Aufnahmeende wird die MP3 einmalig komprimiert auf die Karte geschrieben.
+
 ## Home Assistant per MQTT
 
 MQTT ist standardmäßig deaktiviert und kann im Webinterface konfiguriert werden. Veröffentlicht werden aktueller Schallpegel, aktueller Leq sowie Tages-, Wochen- und Monatshöchstwert.

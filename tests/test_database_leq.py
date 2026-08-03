@@ -20,7 +20,13 @@ class DatabaseLeqTest(unittest.TestCase):
                 db.close()
             database = Database(str(path))
             database.add_measurement("2026-08-01T10:00:00", 50.0, 50.0)
-            database.add_measurement("2026-08-01T10:00:01", 70.0, 70.0)
+            database.add_measurements([
+                ("2026-08-01T10:00:01", 70.0, 70.0),
+                ("2026-08-03T10:00:01", 60.0, 60.0),
+            ])
+            with database.connection() as connection:
+                self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0], 3)
             expected = 10 * math.log10((10 ** 5 + 10 ** 7) / 2)
             actual = database.summary("2026-08-01", "2026-08-02")["leq_db"]
             self.assertAlmostEqual(actual, expected)

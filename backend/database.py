@@ -24,6 +24,8 @@ class Database:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         with self.connection() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA wal_autocheckpoint=256")
             db.executescript(SCHEMA)
             self._add_column(db, "measurements", "leq_db", "REAL")
             self._add_column(db, "events", "leq_db", "REAL")
@@ -36,6 +38,7 @@ class Database:
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA synchronous=NORMAL")
         db.create_aggregate("LEQ", 1, LeqAggregate)
         return db
 
@@ -49,8 +52,14 @@ class Database:
             db.close()
 
     def add_measurement(self, timestamp: str, db_value: float, leq_db: float):
+        self.add_measurements([(timestamp, db_value, leq_db)])
+
+    def add_measurements(self, measurements):
+        """Persist a RAM-buffered batch in one SD-card transaction."""
+        if not measurements:
+            return
         with self.connection() as db:
-            db.execute("INSERT INTO measurements(recorded_at, db, leq_db) VALUES (?, ?, ?)", (timestamp, db_value, leq_db))
+            db.executemany("INSERT INTO measurements(recorded_at, db, leq_db) VALUES (?, ?, ?)", measurements)
 
     def add_event(self, event: dict):
         with self.connection() as db:
