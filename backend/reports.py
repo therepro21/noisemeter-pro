@@ -7,6 +7,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
 from reportlab.graphics.shapes import Drawing, Line, PolyLine, Rect, String
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -71,14 +72,30 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     story = [header, Spacer(1, 0.25 * cm)]
 
     data = site_data or {}
+    calibration_status = "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"
+    calibration_content = Paragraph(calibration_status, normal)
+    if calibration_graphic and calibration_graphic.is_file():
+        image_width, image_height = ImageReader(str(calibration_graphic)).getSize()
+        scale = min(3.8 * cm / image_width, 1.35 * cm / image_height)
+        preview = Image(str(calibration_graphic), width=image_width * scale, height=image_height * scale)
+        calibration_content = Table(
+            [[Paragraph(f"<b>{calibration_status}</b><br/><font size='6.4'>Kalibriergang</font>", normal), preview]],
+            colWidths=[1.8 * cm, 3.9 * cm],
+        )
+        calibration_content.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
     details = [
         ["Aufstellort", data.get("location", ""), "Ausrichtung", data.get("orientation", "")],
         ["Zielobjekt", data.get("target_object", ""), "Messmikrofon", data.get("microphone", "")],
         ["Abstand Boden", data.get("ground_distance", ""), "Abstand Wand", data.get("wall_distance", "")],
         ["Mikrofonwinkel", data.get("calibration_angle", ""), "USB-Pegel", data.get("input_gain", "")],
-        ["Kalibrierdatei", data.get("calibration_file", ""), "Kalibrierstatus", "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"],
+        ["Kalibrierdatei", data.get("calibration_file", ""), calibration_content, ""],
     ]
     details = [[Paragraph(f"<b>{cell}</b>" if index in (0, 2) else str(cell), normal)
+                if isinstance(cell, (str, int, float)) else cell
                 for index, cell in enumerate(row)] for row in details]
     detail_table = Table(details, colWidths=[3.1 * cm, 5.8 * cm, 3.1 * cm, content_width - 12.0 * cm])
     detail_table.setStyle(TableStyle([
@@ -86,6 +103,7 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         ("TEXTCOLOR", (0, 0), (-1, -1), NAVY), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7.8),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8dce7")),
+        ("SPAN", (2, -1), (3, -1)),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 3.5),
     ]))
     story += [detail_table, Spacer(1, 0.24 * cm)]
@@ -124,10 +142,6 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
 
     story += [Paragraph("Ereignisliste", section)]
     story += _event_sections(events, kind, content_width, normal)
-    if calibration_graphic and calibration_graphic.is_file():
-        graphic = Image(str(calibration_graphic), width=6.2 * cm, height=3.5 * cm)
-        graphic.hAlign = "LEFT"
-        story += [Paragraph("Kalibriergang", section), graphic, Paragraph("Grafik aus dem hochgeladenen Kalibrierpaket", normal)]
     document.build(story, onFirstPage=footer, onLaterPages=footer)
 
 

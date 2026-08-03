@@ -262,7 +262,7 @@ def create_app(config_path: str):
         site_data["microphone"] = config["audio"].get("microphone_name") or site_data.get("microphone", "")
         gain = monitor.status()["input_gain"]
         gain_values = gain.get("channels") or ([gain["percent"]] if gain.get("percent") is not None else [])
-        site_data["input_gain"] = " - ".join(f"{value} %" for value in gain_values) + " (automatisch gesetzt)" if gain_values else "Nicht ermittelbar"
+        site_data["input_gain"] = " - ".join(f"{value} %" for value in gain_values) + " (automatisch gesetzt)" if gain_values else "100 % / unverändert"
         site_data["calibration_file"] = config["audio"].get("calibration_file") or "Keine"
         site_data["calibration_angle"] = f"{config['audio'].get('calibration_angle', '0')} Grad"
         logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
