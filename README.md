@@ -1,5 +1,11 @@
 # NoiseMeter Pro 3.0
 
+[Deutsch](README.md) | [English](README.en.md)
+
+![NoiseMeter Pro Webinterface](docs/webinterface.png)
+
+**Schlagwörter:** Lärmmessung · Schallmessung · Lärmprotokoll · Schallpegelmessung · Lautstärkeaufzeichnung · Protokollierung von Lärmereignissen · Raspberry Pi · Leq · USB-Messmikrofon
+
 Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Messmikrofon. NoiseMeter Pro misst den aktuellen frequenz- und zeitbewerteten Schallpegel, den energieäquivalenten Dauerschallpegel Leq und zeichnet Grenzwertüberschreitungen als MP3 auf.
 
 > [!IMPORTANT]
@@ -87,6 +93,8 @@ Fachliche Definition: [Svantek - Leq äquivalenter Dauerschallpegel](https://sva
 ## Bedienung und Daten
 
 Das responsive Webinterface bietet Tages-, ISO-Wochen-, Monats- und Jahresübersichten. Die drei konfigurierten Tageszeiten enthalten Ereignisanzahl, Minimum, arithmetischen Durchschnitt, Maximum und Leq. Das Dark Theme ist standardmäßig aktiv.
+
+Das Webinterface und die PDF-Berichte sind vollständig auf Englisch und Deutsch verfügbar. Beim ersten Programmstart ist Englisch aktiv. Die oben neben dem Dark-Theme-Schalter gewählte Sprache wird im Browser gespeichert und automatisch für PDF-Exporte übernommen.
 
 Neben dem aktuellen Pegel zeigt ein CPU-schonender Wasserfall-Spektrumanalysator 48 logarithmische Frequenzbänder von 20 Hz bis 20 kHz über die letzten 30 Sekunden. Die dominante Frequenz bezeichnet die momentan stärkste kalibrierte und A-/C-bewertete Spektralkomponente. Die Analyse verwendet dieselbe FFT wie die Pegelberechnung und erzeugt daher keine zweite Frequenztransformation.
 

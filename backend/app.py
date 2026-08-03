@@ -33,17 +33,18 @@ def period_range(kind: str, value: str):
     else: raise ValueError("invalid period")
     return start.isoformat(), end.isoformat()
 
-def report_filename(kind: str, start: str, end: str) -> str:
-    titles = {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"}
+def report_filename(kind: str, start: str, end: str, language: str = "de") -> str:
+    titles = ({"day": "DailyReport", "week": "WeeklyReport", "month": "MonthlyReport", "year": "YearlyReport"} if language == "en" else
+              {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"})
     start_date = datetime.strptime(start, "%Y-%m-%d").date()
     inclusive_end = datetime.strptime(end, "%Y-%m-%d").date() - timedelta(days=1)
     start_text, end_text = start_date.strftime("%d-%m-%Y"), inclusive_end.strftime("%d-%m-%Y")
     if kind == "day":
         period = start_text
     elif kind == "week":
-        period = f"KW{start_date.isocalendar().week:02d}_{start_text}_bis_{end_text}"
+        period = f"{'CW' if language == 'en' else 'KW'}{start_date.isocalendar().week:02d}_{start_text}_{'to' if language == 'en' else 'bis'}_{end_text}"
     else:
-        period = f"{start_text}_bis_{end_text}"
+        period = f"{start_text}_{'to' if language == 'en' else 'bis'}_{end_text}"
     return f"NoiseMeterPro_{titles[kind]}_{period}.pdf"
 
 def backup_filename(kind: str, start: str, end: str) -> str:
@@ -252,24 +253,26 @@ def create_app(config_path: str):
         if kind not in ("day", "week", "month", "year"): abort(404)
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
-        download_name = report_filename(kind, start, end)
+        language = "de" if request.args.get("lang") == "de" else "en"
+        download_name = report_filename(kind, start, end, language)
         output = Path(config["storage"]["report_dir"]) / download_name
         items = database.events(start, end); period_map = {p["name"]: p for p in config["periods"]}
         for item in items:
             period = period_map.get(item["period_name"], {}); item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10)); item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
-        titles = {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"}
+        titles = ({"day": "Daily report", "week": "Weekly report", "month": "Monthly report", "year": "Yearly report"} if language == "en" else
+                  {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"})
         site_data = dict(config.get("site_data") or {})
         site_data["microphone"] = config["audio"].get("microphone_name") or site_data.get("microphone", "")
         gain = monitor.status()["input_gain"]
         gain_values = gain.get("channels") or ([gain["percent"]] if gain.get("percent") is not None else [])
-        site_data["input_gain"] = " - ".join(f"{value} %" for value in gain_values) + " (automatisch gesetzt)" if gain_values else "100 % / unverändert"
-        site_data["calibration_file"] = config["audio"].get("calibration_file") or "Keine"
-        site_data["calibration_angle"] = f"{config['audio'].get('calibration_angle', '0')} Grad"
+        site_data["input_gain"] = " - ".join(f"{value} %" for value in gain_values) + (" (set automatically)" if language == "en" else " (automatisch gesetzt)") if gain_values else ("100% / unchanged" if language == "en" else "100 % / unverändert")
+        site_data["calibration_file"] = config["audio"].get("calibration_file") or ("None" if language == "en" else "Keine")
+        site_data["calibration_angle"] = f"{config['audio'].get('calibration_angle', '0')} {'degrees' if language == 'en' else 'Grad'}"
         logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
         graphic_name = config["audio"].get("calibration_graphic")
         graphic = Path(config["storage"]["calibration_dir"]) / graphic_name if graphic_name else None
         daily_histories = database.daily_histories(start, end) if kind == "week" else None
-        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic, database.report_history(kind, start, end), daily_histories)
+        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic, database.report_history(kind, start, end), daily_histories, language)
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=download_name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):

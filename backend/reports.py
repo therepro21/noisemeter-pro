@@ -22,20 +22,31 @@ def german_date(value: str) -> str:
     current = datetime.strptime(value[:10], "%Y-%m-%d").date()
     return f"{GERMAN_DAYS[current.weekday()]}, {current.day}. {GERMAN_MONTHS[current.month - 1]} {current.year}"
 
+def localized_date(value: str, language: str) -> str:
+    current = datetime.strptime(value[:10], "%Y-%m-%d").date()
+    return current.strftime("%A, %d %B %Y") if language == "en" else german_date(value)
 
-def report_subtitle(kind: str, value: str, start: str, end: str) -> str:
+def tr(language: str, german: str, english: str) -> str:
+    return english if language == "en" else german
+
+def period_label(value: str, language: str) -> str:
+    return {"Tag": "Day", "Abend": "Evening", "Nacht": "Night"}.get(value, value) if language == "en" else value
+
+
+def report_subtitle(kind: str, value: str, start: str, end: str, language: str = "de") -> str:
     if kind == "day":
-        return f"für {german_date(start)}"
+        return f"for {localized_date(start, language)}" if language == "en" else f"für {german_date(start)}"
     inclusive_end = (datetime.strptime(end, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
-    week = f"Kalenderwoche {datetime.strptime(start, '%Y-%m-%d').date().isocalendar().week} - " if kind == "week" else ""
-    return f"{week}{german_date(start)} bis {german_date(inclusive_end)}"
+    week_number = datetime.strptime(start, '%Y-%m-%d').date().isocalendar().week
+    week = f"Calendar week {week_number} - " if language == "en" and kind == "week" else f"Kalenderwoche {week_number} - " if kind == "week" else ""
+    return f"{week}{localized_date(start, language)} to {localized_date(inclusive_end, language)}" if language == "en" else f"{week}{german_date(start)} bis {german_date(inclusive_end)}"
 
 
 def create_report(path: Path, title: str, kind: str, value: str, start: str, end: str,
                   summary: dict, events: list[dict], site_name: str, site_data: dict | None = None,
                   breakdown: list[dict] | None = None, logo_path: Path | None = None,
                   calibration_graphic: Path | None = None, history: list[dict] | None = None,
-                  daily_histories: list[dict] | None = None):
+                  daily_histories: list[dict] | None = None, language: str = "de"):
     path.parent.mkdir(parents=True, exist_ok=True)
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=1.25 * cm, rightMargin=1.25 * cm,
@@ -56,12 +67,12 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         canvas.setFillColor(colors.HexColor("#607886"))
         canvas.setFont("Helvetica", 7.5)
         canvas.drawString(doc.leftMargin, 0.48 * cm, "© 2026 Michael P. Thiess · NoiseMeter Pro 3.0")
-        canvas.drawRightString(A4[0] - doc.rightMargin, 0.48 * cm, f"Seite {doc.page}")
+        canvas.drawRightString(A4[0] - doc.rightMargin, 0.48 * cm, f"{tr(language, 'Seite', 'Page')} {doc.page}")
         canvas.restoreState()
 
     logo = Image(str(logo_path), width=1.25 * cm, height=1.25 * cm) if logo_path and logo_path.is_file() else Spacer(1.25 * cm, 1.25 * cm)
-    heading = [Paragraph("NoiseMeter Pro 3.0", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end)}", header_text)]
-    header = Table([[logo, heading, Paragraph(f"<b>Messstelle</b><br/>{site_name}", header_text)]],
+    heading = [Paragraph("NoiseMeter Pro 3.0", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end, language)}", header_text)]
+    header = Table([[logo, heading, Paragraph(f"<b>{tr(language, 'Messstelle', 'Measurement site')}</b><br/>{site_name}", header_text)]],
                    colWidths=[1.55 * cm, content_width - 6.2 * cm, 4.65 * cm])
     header.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), BLUE), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -71,14 +82,15 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     story = [header, Spacer(1, 0.25 * cm)]
 
     data = site_data or {}
-    calibration_status = "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"
+    calibrated = data.get("calibration_file") not in ("Keine", "None")
+    calibration_status = tr(language, "Kalibriert", "Calibrated") if calibrated else tr(language, "Unkalibriert", "Uncalibrated")
     calibration_content = Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b></font>", normal)
     if calibration_graphic and calibration_graphic.is_file():
         # Fill the available horizontal space as requested. ReportLab keeps the
         # original losslessly compressed pixels and changes only the display matrix.
         preview = Image(str(calibration_graphic), width=9.8 * cm, height=3.6 * cm)
         calibration_content = Table(
-            [[Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b> - Kalibriergang</font>", normal), preview]],
+            [[Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b> - {tr(language, 'Kalibriergang', 'calibration plot')}</font>", normal), preview]],
             colWidths=[5.3 * cm, 10.0 * cm],
         )
         calibration_content.setStyle(TableStyle([
@@ -87,11 +99,11 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
             ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
     details = [
-        ["Aufstellort", data.get("location", ""), "Ausrichtung", data.get("orientation", "")],
-        ["Zielobjekt", data.get("target_object", ""), "Messmikrofon", data.get("microphone", "")],
-        ["Abstand Boden", data.get("ground_distance", ""), "Abstand Wand", data.get("wall_distance", "")],
-        ["Mikrofonwinkel", data.get("calibration_angle", ""), "USB-Pegel", data.get("input_gain", "")],
-        ["Kalibrierdatei", calibration_content, "", ""],
+        [tr(language,"Aufstellort","Installation location"), data.get("location", ""), tr(language,"Ausrichtung","Orientation"), data.get("orientation", "")],
+        [tr(language,"Zielobjekt","Target object"), data.get("target_object", ""), tr(language,"Messmikrofon","Measurement microphone"), data.get("microphone", "")],
+        [tr(language,"Abstand Boden","Ground distance"), data.get("ground_distance", ""), tr(language,"Abstand Wand","Wall distance"), data.get("wall_distance", "")],
+        [tr(language,"Mikrofonwinkel","Microphone angle"), data.get("calibration_angle", ""), tr(language,"USB-Pegel","USB level"), data.get("input_gain", "")],
+        [tr(language,"Kalibrierdatei","Calibration file"), calibration_content, "", ""],
     ]
     details = [[Paragraph(f"<b>{cell}</b>" if index in (0, 2) else str(cell), normal)
                 if isinstance(cell, (str, int, float)) else cell
@@ -108,7 +120,7 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     ]))
     story += [detail_table, Spacer(1, 0.24 * cm)]
 
-    statistics = [["Ereignisse", "Maximaler Ereignispegel", "Ø Ereignispegel", "Leq"],
+    statistics = [[tr(language,"Ereignisse","Events"), tr(language,"Maximaler Ereignispegel","Maximum event level"), tr(language,"Ø Ereignispegel","Average event level"), "Leq"],
                   [str(summary["event_count"]), f"{summary['peak_db']:.1f} dB", f"{summary['average_db']:.1f} dB", _db(summary.get("leq_db"))]]
     stats = Table(statistics, colWidths=[content_width / 4] * 4)
     stats.setStyle(TableStyle([
@@ -120,34 +132,34 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     ]))
     story += [stats]
 
-    story += [Paragraph("Pegel- und Leq-Verlauf", section), _level_chart(history or [], content_width)]
+    story += [Paragraph(tr(language,"Pegel- und Leq-Verlauf","Level and Leq history"), section), _level_chart(history or [], content_width, language=language)]
 
     if kind == "week" and daily_histories:
-        story += [Paragraph("Tagesverläufe der Kalenderwoche", section)]
+        story += [Paragraph(tr(language,"Tagesverläufe der Kalenderwoche","Daily histories for the calendar week"), section)]
         day_title = ParagraphStyle("DayChart", parent=normal, fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=NAVY, spaceAfter=3)
         for day in daily_histories:
             story.append(KeepTogether([
-                Paragraph(german_date(day["date"]), day_title),
-                _level_chart(day["points"], content_width, 3.25 * cm),
+                Paragraph(localized_date(day["date"], language), day_title),
+                _level_chart(day["points"], content_width, 3.25 * cm, language),
                 Spacer(1, 0.16 * cm),
             ]))
 
     if breakdown:
-        rows = [["Zeitabschnitt", "Maximalpegel", "Durchschnittspegel", "Leq"]] + [
+        rows = [[tr(language,"Zeitabschnitt","Period"), tr(language,"Maximalpegel","Maximum level"), tr(language,"Durchschnittspegel","Average level"), "Leq"]] + [
             [item["label"], f"{item['maximum_db']:.1f} dB", f"{item['average_db']:.1f} dB", _db(item.get("leq_db"))] for item in breakdown
         ]
         table = Table(rows, repeatRows=1, colWidths=[content_width * 0.37, content_width * 0.21, content_width * 0.21, content_width * 0.21])
         table.setStyle(_data_table_style())
-        story += [Paragraph("Pegelauswertung", section), table]
+        story += [Paragraph(tr(language,"Pegelauswertung","Level analysis"), section), table]
 
-    story += [Paragraph("Ereignisliste", section)]
-    story += _event_sections(events, kind, content_width, normal)
+    story += [Paragraph(tr(language,"Ereignisliste","Event list"), section)]
+    story += _event_sections(events, kind, content_width, normal, language)
     document.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
-def _event_sections(events, kind, width, normal):
+def _event_sections(events, kind, width, normal, language="de"):
     if not events:
-        table = Table([["Keine Ereignisse im gewählten Zeitraum"]], colWidths=[width])
+        table = Table([[tr(language,"Keine Ereignisse im gewählten Zeitraum","No events in the selected period")]], colWidths=[width])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f5f9fb")),
             ("TEXTCOLOR", (0, 0), (-1, -1), NAVY), ("FONTSIZE", (0, 0), (-1, -1), 8),
@@ -163,27 +175,29 @@ def _event_sections(events, kind, width, normal):
         groups = [(name, [event for event in ordered if event["period_name"] == name]) for name in names]
     else:
         dates = sorted({event["occurred_at"][:10] for event in ordered})
-        groups = [(german_date(day), [event for event in ordered if event["occurred_at"].startswith(day)]) for day in dates]
+        groups = [(localized_date(day, language), [event for event in ordered if event["occurred_at"].startswith(day)]) for day in dates]
 
     result = []
     group_style = ParagraphStyle("EventGroup", parent=normal, fontName="Helvetica-Bold", fontSize=8.6, leading=10.5, textColor=NAVY)
     for label, items in groups:
         color = PERIOD_COLORS.get(label, PALE)
-        marker = Table([["", Paragraph(f"{label} · {len(items)} Ereignis{'se' if len(items) != 1 else ''}", group_style)]], colWidths=[0.16 * cm, width - 0.16 * cm])
+        display_label = period_label(label, language)
+        count_text = f"{len(items)} event{'s' if len(items) != 1 else ''}" if language == "en" else f"{len(items)} Ereignis{'se' if len(items) != 1 else ''}"
+        marker = Table([["", Paragraph(f"{display_label} · {count_text}", group_style)]], colWidths=[0.16 * cm, width - 0.16 * cm])
         marker.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (0, 0), color), ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#edf5f9")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (0, 0), 0),
             ("RIGHTPADDING", (0, 0), (0, 0), 0), ("LEFTPADDING", (1, 0), (1, 0), 6),
             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
-        result += [KeepTogether([marker, _event_table(items, width)]), Spacer(1, 0.16 * cm)]
+        result += [KeepTogether([marker, _event_table(items, width, language)]), Spacer(1, 0.16 * cm)]
     return result
 
 
-def _event_table(events, width):
+def _event_table(events, width, language="de"):
     event_style = ParagraphStyle("EventPeak", fontName="Helvetica", fontSize=7.2, leading=8.2, textColor=NAVY)
-    rows = [["Bereich", "Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Dauer"]] + [
-        [event["period_name"], event["occurred_at"].replace("T", " "),
+    rows = [[tr(language,"Bereich","Period"), tr(language,"Zeitpunkt","Time"), tr(language,"Spitze","Peak"), "Leq", tr(language,"Grenzwert","Threshold"), tr(language,"Dauer","Duration")]] + [
+        [period_label(event["period_name"], language), event["occurred_at"].replace("T", " "),
          Paragraph(f"{event['peak_db']:.1f} dB<br/><font size='5.8'>Dominant: {_frequency(event.get('dominant_frequency_hz'))}</font>", event_style), _db(event.get("leq_db")),
          f"{event['threshold_db']:.1f} dB", f"{round(event['duration_seconds'])} s"] for event in events
     ]
@@ -222,13 +236,13 @@ def _frequency(value):
     return f"{frequency / 1000:.1f} kHz" if frequency >= 1000 else f"{frequency:.0f} Hz"
 
 
-def _level_chart(points, width, height=4.25 * cm):
+def _level_chart(points, width, height=4.25 * cm, language="de"):
     """PDF equivalent of the blue web chart: white level curve and cyan Leq curve."""
     chart = Drawing(width, height)
     chart.add(Rect(0, 0, width, height, rx=7, ry=7, fillColor=BLUE, strokeColor=None))
     values = [float(point[key]) for point in points for key in ("db", "leq_db") if point.get(key) is not None]
     if not values:
-        chart.add(String(14, height / 2, "Keine Messwerte im Exportzeitraum", fontName="Helvetica", fontSize=8, fillColor=colors.white))
+        chart.add(String(14, height / 2, tr(language,"Keine Messwerte im Exportzeitraum","No measurements in the export period"), fontName="Helvetica", fontSize=8, fillColor=colors.white))
         return chart
     minimum = int(min(values) // 5 * 5 - 5)
     maximum = int(-(-max(values) // 5) * 5 + 5)
@@ -252,7 +266,7 @@ def _level_chart(points, width, height=4.25 * cm):
     chart.add(String(left, 6, start_label, fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
     chart.add(String(width - right, 6, end_label, fontName="Helvetica", fontSize=6.5, fillColor=colors.white, textAnchor="end"))
     chart.add(Line(left, height - 11, left + 13, height - 11, strokeColor=colors.white, strokeWidth=1.5))
-    chart.add(String(left + 17, height - 14, "Pegel", fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
+    chart.add(String(left + 17, height - 14, tr(language,"Pegel","Level"), fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
     chart.add(Line(left + 55, height - 11, left + 68, height - 11, strokeColor=colors.HexColor("#32e1f2"), strokeWidth=1.5))
     chart.add(String(left + 72, height - 14, "Leq", fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
     return chart

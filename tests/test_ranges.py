@@ -17,6 +17,7 @@ class PeriodRangeTest(unittest.TestCase):
     def test_report_filenames(self):
         self.assertEqual(report_filename("day", "2026-08-03", "2026-08-04"), "NoiseMeterPro_Tagesbericht_03-08-2026.pdf")
         self.assertEqual(report_filename("week", "2026-08-03", "2026-08-10"), "NoiseMeterPro_Wochenbericht_KW32_03-08-2026_bis_09-08-2026.pdf")
+        self.assertEqual(report_filename("week", "2026-08-03", "2026-08-10", "en"), "NoiseMeterPro_WeeklyReport_CW32_03-08-2026_to_09-08-2026.pdf")
         self.assertEqual(backup_filename("week", "2026-08-03", "2026-08-10"), "NoiseMeterPro_Backup_KW32_03-08-2026_bis_09-08-2026.zip")
 
 if __name__ == "__main__":
