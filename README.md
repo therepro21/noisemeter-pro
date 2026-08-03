@@ -73,6 +73,8 @@ Fachliche Definition: [Svantek - Leq äquivalenter Dauerschallpegel](https://sva
 
 Das responsive Webinterface bietet Tages-, ISO-Wochen-, Monats- und Jahresübersichten. Die drei konfigurierten Tageszeiten enthalten Ereignisanzahl, Minimum, arithmetischen Durchschnitt, Maximum und Leq. Das Dark Theme ist standardmäßig aktiv.
 
+Jeder PDF-Bericht enthält den blau hinterlegten Pegel-/Leq-Verlauf des ausgewählten Zeitraums. PDF-Dateien beginnen mit `NoiseMeterPro`, verwenden Datumsangaben im Format `TT-MM-JJJJ` und führen bei Wochenberichten zusätzlich die Kalenderwoche. Die kompakte Fußleiste des Webinterfaces bleibt dauerhaft sichtbar; ihr belegter Speicherwert umfasst ausschließlich NoiseMeter-Pro-Datenbank, MP3-Aufnahmen, Berichte und Kalibrierdateien.
+
 Fehlmessungen können unter **Einstellungen → Messdaten löschen** vollständig entfernt werden. Dabei werden Messwerte, Ereignisse und zugehörige MP3-Dateien dauerhaft gelöscht.
 
 Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`, die Datenbank in `/var/lib/noisemeter/noisemeter.sqlite3` und die Konfiguration in `/etc/noisemeter/config.yaml`.

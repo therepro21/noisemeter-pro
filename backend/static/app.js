@@ -39,11 +39,14 @@ async function loadStatus() {
       $('#level').innerHTML = `${value.db.toFixed(1).replace('.', ',')} <small>dB</small>`;
       $('#uncalibrated-level').textContent = db(value.uncalibrated_db);
       $('#live-leq').textContent = db(value.leq_db);
+      const mixer = value.input_gain?.channels?.length ? value.input_gain.channels.map(level => `${level} %`).join(' - ') : value.input_gain?.percent != null ? `${value.input_gain.percent} %` : 'nicht regelbar';
+      $('#mixer-level').textContent = mixer;
       $('#level').hidden = false; $('#microphone-warning').hidden = true;
       $('#connection').textContent = '● Messung aktiv'; $('#connection').className = 'online';
     } else {
       $('#level').innerHTML = '0,0 <small>dB</small>'; $('#level').hidden = true;
       $('#uncalibrated-level').textContent = '–'; $('#live-leq').textContent = '–';
+      $('#mixer-level').textContent = '–';
       $('#microphone-warning').hidden = false; $('#connection').textContent = '● Kein Messmikrofon'; $('#connection').className = 'offline';
     }
     $('#recording').hidden = !value.recording;
@@ -99,7 +102,8 @@ async function loadConfig() {
   $('#period-form').innerHTML = value.periods.map((period, index) => `<div class="period-row"><input name="name${index}" value="${period.name}"><input name="start${index}" type="time" value="${period.start}"><input name="end${index}" type="time" value="${period.end}"><input name="threshold${index}" type="number" step=".1" value="${period.threshold_db}"><input name="warning${index}" type="number" step=".1" value="${period.warning_db ?? +period.threshold_db + 10}"><input name="severe${index}" type="number" step=".1" value="${period.severe_db ?? +period.threshold_db + 15}"><input name="enabled${index}" type="checkbox" ${period.enabled !== false ? 'checked' : ''}></div>`).join('');
   $('#bitrate').value = value.audio.mp3_bitrate_kbps; $('#retention').value = value.storage.retention_days; $('#pre-roll').value = value.audio.pre_roll_seconds; $('#post-roll').value = value.audio.post_roll_seconds;
   $('#weighting').value = value.audio.weighting; $('#time-weighting').value = value.audio.time_weighting; $('#manual-calibration').value = value.audio.manual_calibration_db; $('#calibration-file').textContent = value.audio.calibration_file ? `Aktiv: ${value.audio.calibration_file} (${value.audio.calibration_angle}°), ${value.calibration.points} Frequenzpunkte` : 'Keine Kalibrierdatei hinterlegt.';
-  $('#microphone-name').value = value.audio.microphone_name || ''; $('#site-name').value = value.site_name; $('#site-location').value = site.location || ''; $('#site-orientation').value = site.orientation || ''; $('#site-angle').value = value.audio.calibration_angle || '0'; $('#site-target').value = site.target_object || ''; $('#site-ground').value = site.ground_distance || ''; $('#site-wall').value = site.wall_distance || ''; $('#gain-status').textContent = value.input_gain.percent == null ? 'USB-Aufnahmepegel konnte noch nicht ermittelt werden.' : `USB-Aufnahmepegel: ${value.input_gain.percent} %${value.input_gain.enforced ? ' (automatisch auf Maximum gesetzt)' : ''}`;
+  const gainValues = value.input_gain.channels?.length ? value.input_gain.channels : value.input_gain.percent == null ? [] : [value.input_gain.percent];
+  $('#microphone-name').value = value.audio.microphone_name || ''; $('#site-name').value = value.site_name; $('#site-location').value = site.location || ''; $('#site-orientation').value = site.orientation || ''; $('#site-angle').value = value.audio.calibration_angle || '0'; $('#site-target').value = site.target_object || ''; $('#site-ground').value = site.ground_distance || ''; $('#site-wall').value = site.wall_distance || ''; $('#gain-status').textContent = gainValues.length ? `USB-Mixerpegel: ${gainValues.map(level => `${level} %`).join(' - ')}${value.input_gain.enforced ? ' (bei Programmstart automatisch auf Maximum gesetzt)' : ''}` : 'USB-Aufnahmepegel konnte noch nicht ermittelt werden.';
   $('#mqtt-enabled').checked = value.mqtt.enabled; $('#mqtt-host').value = value.mqtt.host; $('#mqtt-port').value = value.mqtt.port; $('#mqtt-user').value = value.mqtt.username; $('#mqtt-discovery').value = value.mqtt.discovery_prefix; $('#mqtt-topic').value = value.mqtt.base_topic;
   return value;
 }

@@ -87,6 +87,21 @@ class Database:
                 ORDER BY minute
             """, (start, end))]
 
+    def report_history(self, kind: str, start: str, end: str):
+        """Compact peak/Leq series sized for a PDF chart of the selected export period."""
+        grouping = {
+            "day": "substr(recorded_at, 1, 14) || printf('%02d', CAST(substr(recorded_at, 15, 2) AS INTEGER) / 5 * 5)",
+            "week": "substr(recorded_at, 1, 13) || ':00'",
+            "month": "substr(recorded_at, 1, 10)",
+            "year": "strftime('%Y-W%W', recorded_at)",
+        }[kind]
+        with self.connection() as db:
+            return [dict(row) for row in db.execute(
+                f"""SELECT {grouping} label, MAX(db) db, LEQ(leq_db) leq_db
+                    FROM measurements WHERE recorded_at >= ? AND recorded_at < ?
+                    GROUP BY {grouping} ORDER BY label""", (start, end)
+            )]
+
     def level_breakdown(self, kind: str, start: str, end: str):
         grouping = {"day": "substr(recorded_at,12,2) || ':00'", "week": "substr(recorded_at,1,10)", "month": "strftime('%Y-W%W', recorded_at)", "year": "substr(recorded_at,1,7)"}[kind]
         with self.connection() as db:

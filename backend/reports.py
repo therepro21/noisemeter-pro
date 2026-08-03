@@ -7,6 +7,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.graphics.shapes import Drawing, Line, PolyLine, Rect, String
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 BLUE = colors.HexColor("#176b9a")
@@ -25,13 +26,14 @@ def report_subtitle(kind: str, value: str, start: str, end: str) -> str:
     if kind == "day":
         return f"für {german_date(start)}"
     inclusive_end = (datetime.strptime(end, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
-    return f"{german_date(start)} bis {german_date(inclusive_end)}"
+    week = f"Kalenderwoche {datetime.strptime(start, '%Y-%m-%d').date().isocalendar().week} - " if kind == "week" else ""
+    return f"{week}{german_date(start)} bis {german_date(inclusive_end)}"
 
 
 def create_report(path: Path, title: str, kind: str, value: str, start: str, end: str,
                   summary: dict, events: list[dict], site_name: str, site_data: dict | None = None,
                   breakdown: list[dict] | None = None, logo_path: Path | None = None,
-                  calibration_graphic: Path | None = None):
+                  calibration_graphic: Path | None = None, history: list[dict] | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=1.25 * cm, rightMargin=1.25 * cm,
@@ -98,6 +100,8 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     ]))
     story += [stats]
 
+    story += [Paragraph("Pegel- und Leq-Verlauf", section), _level_chart(history or [], content_width)]
+
     if breakdown:
         rows = [["Zeitabschnitt", "Maximalpegel", "Durchschnittspegel", "Leq"]] + [
             [item["label"], f"{item['maximum_db']:.1f} dB", f"{item['average_db']:.1f} dB", _db(item.get("leq_db"))] for item in breakdown
@@ -137,3 +141,50 @@ def _data_table_style():
 
 def _db(value):
     return f"{float(value):.1f} dB" if value is not None else "-"
+
+
+def _level_chart(points, width):
+    """PDF equivalent of the blue web chart: white level curve and cyan Leq curve."""
+    height = 4.25 * cm
+    chart = Drawing(width, height)
+    chart.add(Rect(0, 0, width, height, rx=7, ry=7, fillColor=BLUE, strokeColor=None))
+    values = [float(point[key]) for point in points for key in ("db", "leq_db") if point.get(key) is not None]
+    if not values:
+        chart.add(String(14, height / 2, "Keine Messwerte im Exportzeitraum", fontName="Helvetica", fontSize=8, fillColor=colors.white))
+        return chart
+    minimum = int(min(values) // 5 * 5 - 5)
+    maximum = int(-(-max(values) // 5) * 5 + 5)
+    left, right, top, bottom = 38, 8, 23, 20
+    plot_width, plot_height = width - left - right, height - top - bottom
+    y = lambda value: bottom + (float(value) - minimum) / max(maximum - minimum, 1) * plot_height
+    for level in (minimum, (minimum + maximum) / 2, maximum):
+        yy = y(level)
+        chart.add(Line(left, yy, width - right, yy, strokeColor=colors.Color(1, 1, 1, alpha=.22), strokeWidth=.5))
+        chart.add(String(4, yy - 3, f"{level:.0f} dB", fontName="Helvetica", fontSize=6.5, fillColor=colors.HexColor("#d7e8f0")))
+    for key, color in (("db", colors.white), ("leq_db", colors.HexColor("#32e1f2"))):
+        coordinates = []
+        for index, point in enumerate(points):
+            if point.get(key) is None:
+                continue
+            xx = left + index / max(len(points) - 1, 1) * plot_width
+            coordinates.append((xx, y(point[key])))
+        if len(coordinates) >= 2:
+            chart.add(PolyLine(coordinates, strokeColor=color, strokeWidth=1.5, fillColor=None))
+    start_label, end_label = _chart_label(points[0]["label"]), _chart_label(points[-1]["label"])
+    chart.add(String(left, 6, start_label, fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
+    chart.add(String(width - right, 6, end_label, fontName="Helvetica", fontSize=6.5, fillColor=colors.white, textAnchor="end"))
+    chart.add(Line(left, height - 11, left + 13, height - 11, strokeColor=colors.white, strokeWidth=1.5))
+    chart.add(String(left + 17, height - 14, "Pegel", fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
+    chart.add(Line(left + 55, height - 11, left + 68, height - 11, strokeColor=colors.HexColor("#32e1f2"), strokeWidth=1.5))
+    chart.add(String(left + 72, height - 14, "Leq", fontName="Helvetica", fontSize=6.5, fillColor=colors.white))
+    return chart
+
+
+def _chart_label(value):
+    text = str(value)
+    for pattern, output in (("%Y-%m-%dT%H:%M", "%d-%m-%Y %H:%M"), ("%Y-%m-%d", "%d-%m-%Y")):
+        try:
+            return datetime.strptime(text, pattern).strftime(output)
+        except ValueError:
+            continue
+    return text

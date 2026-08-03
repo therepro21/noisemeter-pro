@@ -42,7 +42,7 @@ class NoiseMonitor:
         self.smoothed_uncalibrated_energy = None
         self.leq_window = deque(maxlen=max(1, round(60 / float(audio["block_seconds"]))))
         self.measurement_energy, self.measurement_blocks = 0.0, 0
-        self.input_gain = {"percent": None, "enforced": False, "control": None, "card": None, "error": None}
+        self.input_gain = {"percent": None, "channels": [], "enforced": False, "control": None, "card": None, "error": None}
         self.calibration = CalibrationProfile()
         self.reload_calibration()
 
@@ -224,7 +224,7 @@ class NoiseMonitor:
 
     def _set_input_gain_100(self):
         """Best-effort ALSA capture-gain enforcement for calibrated USB microphones."""
-        result = {"percent": None, "enforced": False, "control": None, "card": None, "error": None}
+        result = {"percent": None, "channels": [], "enforced": False, "control": None, "card": None, "error": None}
         try:
             cards = subprocess.run(["arecord", "-l"], capture_output=True, text=True, timeout=5, check=True).stdout
             card_ids = re.findall(r"card\s+(\d+):[^\n]*USB", cards, re.I) or re.findall(r"card\s+(\d+):", cards, re.I)
@@ -238,7 +238,7 @@ class NoiseMonitor:
                     state = subprocess.run(["amixer", "-c", card, "sget", control], capture_output=True, text=True, timeout=5, check=True).stdout
                     percentages = [int(value) for value in re.findall(r"\[(\d+)%\]", state)]
                     if percentages:
-                        result.update(percent=min(percentages), enforced=all(value == 100 for value in percentages), control=control, card=int(card))
+                        result.update(percent=min(percentages), channels=percentages, enforced=all(value == 100 for value in percentages), control=control, card=int(card))
                         return result
             result["error"] = "Kein regelbarer ALSA-Aufnahmepegel gefunden"
         except Exception as error:

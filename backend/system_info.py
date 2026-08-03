@@ -6,8 +6,13 @@ import time
 
 class SystemInfo:
     """Small dependency-free Linux/Raspberry Pi status reader."""
-    def __init__(self, storage_path: str):
-        self.storage_path = storage_path
+    def __init__(self, storage):
+        if isinstance(storage, dict):
+            self.storage_path = storage["audio_dir"]
+            self.application_paths = [storage.get(key) for key in ("audio_dir", "database", "report_dir", "calibration_dir")]
+        else:
+            self.storage_path = storage
+            self.application_paths = [storage]
         self.last_total = None
         self.last_idle = None
 
@@ -35,6 +40,26 @@ class SystemInfo:
 
     def read(self):
         usage = shutil.disk_usage(self.storage_path)
+        application_used = self._application_size()
         return {"cpu_percent": self._cpu_percent(), "cpu_temperature": self._temperature(),
-                "disk_total": usage.total, "disk_used": usage.used, "disk_free": usage.free,
+                "disk_total": usage.total, "disk_used": application_used, "disk_free": usage.free,
                 "checked_at": int(time.time())}
+
+    def _application_size(self):
+        """Bytes occupied by NoiseMeter Pro database, recordings, reports and calibration data."""
+        total, visited = 0, set()
+        for configured in self.application_paths:
+            if not configured:
+                continue
+            path = Path(configured)
+            candidates = [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
+            for candidate in candidates:
+                try:
+                    resolved = candidate.resolve()
+                    if resolved in visited or not candidate.is_file() or candidate.is_symlink():
+                        continue
+                    visited.add(resolved)
+                    total += candidate.stat().st_size
+                except OSError:
+                    continue
+        return total

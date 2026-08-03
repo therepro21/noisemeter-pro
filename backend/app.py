@@ -32,6 +32,24 @@ def period_range(kind: str, value: str):
     else: raise ValueError("invalid period")
     return start.isoformat(), end.isoformat()
 
+def report_filename(kind: str, start: str, end: str) -> str:
+    titles = {"day": "Tagesbericht", "week": "Wochenbericht", "month": "Monatsbericht", "year": "Jahresbericht"}
+    start_date = datetime.strptime(start, "%Y-%m-%d").date()
+    inclusive_end = datetime.strptime(end, "%Y-%m-%d").date() - timedelta(days=1)
+    start_text, end_text = start_date.strftime("%d-%m-%Y"), inclusive_end.strftime("%d-%m-%Y")
+    if kind == "day":
+        period = start_text
+    elif kind == "week":
+        period = f"KW{start_date.isocalendar().week:02d}_{start_text}_bis_{end_text}"
+    else:
+        period = f"{start_text}_bis_{end_text}"
+    return f"NoiseMeterPro_{titles[kind]}_{period}.pdf"
+
+def backup_filename(kind: str, start: str, end: str) -> str:
+    pdf_name = report_filename(kind, start, end)
+    period = pdf_name.split("_", 2)[2].rsplit(".", 1)[0]
+    return f"NoiseMeterPro_Backup_{period}.zip"
+
 def create_app(config_path: str):
     config = load_config(config_path)
     app = Flask(__name__); app.config["SECRET_KEY"] = config["web"]["secret_key"]
@@ -39,7 +57,7 @@ def create_app(config_path: str):
     mqtt = MqttPublisher(config["mqtt"], database); monitor.on_measurement = mqtt.publish_measurement
     mqtt.start()
     app.extensions["mqtt"] = mqtt
-    system_info = SystemInfo(config["storage"]["audio_dir"])
+    system_info = SystemInfo(config["storage"])
     app.extensions["monitor"], app.extensions["database"], app.extensions["nm_config"], app.extensions["config_path"] = monitor, database, config, config_path
 
     @app.get("/")
@@ -232,7 +250,8 @@ def create_app(config_path: str):
         if kind not in ("day", "week", "month", "year"): abort(404)
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
-        output = Path(config["storage"]["report_dir"]) / f"{kind}_{value}.pdf"
+        download_name = report_filename(kind, start, end)
+        output = Path(config["storage"]["report_dir"]) / download_name
         items = database.events(start, end); period_map = {p["name"]: p for p in config["periods"]}
         for item in items:
             period = period_map.get(item["period_name"], {}); item["warning_db"] = float(period.get("warning_db", item["threshold_db"] + 10)); item["severe_db"] = float(period.get("severe_db", item["threshold_db"] + 15))
@@ -240,22 +259,29 @@ def create_app(config_path: str):
         site_data = dict(config.get("site_data") or {})
         site_data["microphone"] = config["audio"].get("microphone_name") or site_data.get("microphone", "")
         gain = monitor.status()["input_gain"]
-        site_data["input_gain"] = f"{gain['percent']} % (automatisch gesetzt)" if gain.get("percent") is not None else "Nicht ermittelbar"
+        gain_values = gain.get("channels") or ([gain["percent"]] if gain.get("percent") is not None else [])
+        site_data["input_gain"] = " - ".join(f"{value} %" for value in gain_values) + " (automatisch gesetzt)" if gain_values else "Nicht ermittelbar"
         site_data["calibration_file"] = config["audio"].get("calibration_file") or "Keine"
         site_data["calibration_angle"] = f"{config['audio'].get('calibration_angle', '0')} Grad"
         logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
         graphic_name = config["audio"].get("calibration_graphic")
         graphic = Path(config["storage"]["calibration_dir"]) / graphic_name if graphic_name else None
-        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic)
-        return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=output.name)
+        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic, database.report_history(kind, start, end))
+        return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=download_name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):
         try: start, end = period_range(kind, value)
         except ValueError: abort(400)
-        output = Path(config["storage"]["report_dir"]) / f"backup_{kind}_{value}.zip"
+        download_name = backup_filename(kind, start, end)
+        output = Path(config["storage"]["report_dir"]) / download_name
         events = database.events(start, end); root = Path(config["storage"]["audio_dir"])
         from openpyxl import Workbook
         workbook = Workbook(); sheet = workbook.active; sheet.title = "Ereignisse"
+        info = workbook.create_sheet("Exportinformationen", 0)
+        info.append(["NoiseMeter Pro Export", kind])
+        info.append(["Von", datetime.strptime(start, "%Y-%m-%d").strftime("%d-%m-%Y")])
+        info.append(["Bis", (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=1)).strftime("%d-%m-%Y")])
+        if kind == "week": info.append(["Kalenderwoche", datetime.strptime(start, "%Y-%m-%d").date().isocalendar().week])
         sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "MP3-Datei"])
         for event in events:
             sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event["filename"]])
@@ -266,7 +292,7 @@ def create_app(config_path: str):
             for event in events:
                 audio = root / event["filename"]
                 if audio.is_file(): archive.write(audio, f"audio/{event['filename']}")
-        return send_file(output, as_attachment=True, download_name=output.name)
+        return send_file(output, as_attachment=True, download_name=download_name)
     return app
 
 def main():
