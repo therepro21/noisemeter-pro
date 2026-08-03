@@ -1,11 +1,14 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const setText = (selector, value) => { const element = $(selector), text = String(value); if (element.textContent !== text) element.textContent = text; };
+const setHtml = (selector, value) => { const element = $(selector); if (element.innerHTML !== value) element.innerHTML = value; };
 const pad = number => String(number).padStart(2, '0');
 const localDay = value => `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
 const db = value => value == null ? '–' : `${Number(value).toFixed(1).replace('.', ',')} dB`;
 let kind = 'day';
 let selected = new Date();
 let refreshSeconds = 5;
+let overviewLoadId = 0;
 const LIVE_STATUS_INTERVAL_MS = 100;
 
 function toast(message, error = false) {
@@ -40,11 +43,11 @@ async function loadStatus() {
   try {
     const value = await api('/api/status');
     if (value.available && value.db != null) {
-      $('#level').innerHTML = `${value.db.toFixed(1).replace('.', ',')} <small>dB</small>`;
-      $('#uncalibrated-level').textContent = db(value.uncalibrated_db);
-      $('#live-leq').textContent = db(value.leq_db);
+      setHtml('#level', `${value.db.toFixed(1).replace('.', ',')} <small>dB</small>`);
+      setText('#uncalibrated-level', db(value.uncalibrated_db));
+      setText('#live-leq', db(value.leq_db));
       const mixer = value.input_gain?.channels?.length ? value.input_gain.channels.map(level => `${level} %`).join(' - ') : value.input_gain?.percent != null ? `${value.input_gain.percent} %` : 'nicht regelbar';
-      $('#mixer-level').textContent = mixer;
+      setText('#mixer-level', mixer);
       $('#level').hidden = false; $('#microphone-warning').hidden = true;
       $('#connection').textContent = '● Messung aktiv'; $('#connection').className = 'online';
     } else {
@@ -72,6 +75,12 @@ function drawHistory(points) {
   line('db', '#fff'); line('leq_db', '#32e1f2');
   context.fillText(points[0].minute.slice(11, 16), left, height - 5); context.fillText(points.at(-1).minute.slice(11, 16), width - right - 30, height - 5); $('#chart-range').textContent = `${db(Math.min(...values))} – ${db(Math.max(...values))}`;
 }
+function setHistoryLoading(message = 'Wird geladen …') {
+  const panel = $('#history-panel'), loading = $('#history-loading'), canvas = $('#history-chart');
+  panel.classList.add('loading'); loading.hidden = false; loading.textContent = message; $('#chart-range').textContent = '';
+  const context = canvas.getContext('2d'); context.clearRect(0, 0, canvas.width, canvas.height);
+}
+function finishHistoryLoading() { $('#history-panel').classList.remove('loading'); $('#history-loading').hidden = true; }
 const dateFormat = value => new Intl.DateTimeFormat('de-DE', {weekday:'long', day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'}).format(new Date(value));
 function eventRows(events) {
   $('#events').innerHTML = events.length ? events.map(event => {
@@ -79,23 +88,30 @@ function eventRows(events) {
     return `<tr class="event-${severity}"><td>${dateFormat(event.occurred_at)}</td><td>${db(event.peak_db)}</td><td>${db(event.leq_db)}</td><td>${db(event.threshold_db)}</td><td>${event.period_name}</td><td><audio controls preload="none" src="/audio/${encodeURI(event.filename)}"></audio></td></tr>`;
   }).join('') : '<tr><td colspan="6">Keine Ereignisse in diesem Zeitraum.</td></tr>';
 }
-async function loadPeriodStats() {
-  if (kind !== 'day') return;
-  const result = await api(`/api/period-statistics?date=${localDay(selected)}`);
+function renderPeriodStats(result) {
   $('#period-stats').innerHTML = result.items.map(item => `<article><div class="period-title"><strong>${item.name}</strong><small>${item.start}–${item.end} Uhr</small></div><dl><div><dt>Ereignisse</dt><dd>${item.event_count}</dd></div><div><dt>Maximum</dt><dd>${db(item.maximum_db)}</dd></div><div><dt>Durchschnitt</dt><dd>${db(item.average_db)}</dd></div><div><dt>Leq</dt><dd>${db(item.leq_db)}</dd></div><div><dt>Minimum</dt><dd>${db(item.minimum_db)}</dd></div></dl>${item.measurement_count ? '' : '<p class="no-data">Keine gültigen Messwerte</p>'}</article>`).join('');
 }
-async function loadBreakdown() {
-  const result = await api(`/api/breakdown?kind=${kind}&date=${periodValue()}`), names = {day:'Stundenauswertung', week:'Tagesauswertung', month:'Wochenauswertung', year:'Monatsauswertung'};
-  $('#breakdown').innerHTML = `<h2>${names[kind]}</h2><div class="table-scroll"><table><thead><tr><th>Zeitraum</th><th>Maximalpegel</th><th>Durchschnittspegel</th><th>Leq</th></tr></thead><tbody>${result.items.map(item => `<tr><td>${item.label}</td><td>${db(item.maximum_db)}</td><td>${db(item.average_db)}</td><td>${db(item.leq_db)}</td></tr>`).join('') || '<tr><td colspan="4">Keine gültigen Messwerte.</td></tr>'}</tbody></table></div>`;
+function renderBreakdown(result, selectedKind) {
+  const names = {day:'Stundenauswertung', week:'Tagesauswertung', month:'Wochenauswertung', year:'Monatsauswertung'};
+  $('#breakdown').innerHTML = `<h2>${names[selectedKind]}</h2><div class="table-scroll"><table><thead><tr><th>Zeitraum</th><th>Maximalpegel</th><th>Durchschnittspegel</th><th>Leq</th></tr></thead><tbody>${result.items.map(item => `<tr><td>${item.label}</td><td>${db(item.maximum_db)}</td><td>${db(item.average_db)}</td><td>${db(item.leq_db)}</td></tr>`).join('') || '<tr><td colspan="4">Keine gültigen Messwerte.</td></tr>'}</tbody></table></div>`;
 }
 async function loadEvents() {
+  const loadId = ++overviewLoadId;
   setTitle();
+  setHistoryLoading();
+  const selectedKind = kind, selectedDay = localDay(selected), selectedPeriod = periodValue();
   try {
-    const result = await api(`/api/events?kind=${kind}&date=${periodValue()}`);
+    const [result, history, breakdown, periodStats] = await Promise.all([
+      api(`/api/events?kind=${selectedKind}&date=${selectedPeriod}`),
+      api(`/api/history?date=${selectedDay}`),
+      api(`/api/breakdown?kind=${selectedKind}&date=${selectedPeriod}`),
+      selectedKind === 'day' ? api(`/api/period-statistics?date=${selectedDay}`) : Promise.resolve(null),
+    ]);
+    if (loadId !== overviewLoadId) return;
     $('#count').textContent = result.summary.event_count; $('#peak').textContent = db(result.summary.peak_db); $('#average').textContent = db(result.summary.average_db); $('#summary-leq').textContent = db(result.summary.leq_db); eventRows(result.events);
-    const history = await api(`/api/history?date=${localDay(selected)}`); drawHistory(history.points);
-    await Promise.all([loadBreakdown(), loadPeriodStats()]);
-  } catch (error) { toast('Übersicht konnte nicht geladen werden.', true); }
+    renderBreakdown(breakdown, selectedKind); if (periodStats) renderPeriodStats(periodStats);
+    finishHistoryLoading(); drawHistory(history.points);
+  } catch (error) { if (loadId === overviewLoadId) { setHistoryLoading('Laden fehlgeschlagen'); toast('Übersicht konnte nicht geladen werden.', true); } }
 }
 async function loadCounts() { try { const result = await api('/api/event-counts'); ['day','week','month','year'].forEach(name => $(`#count-${name}`).textContent = result[name]); } catch (_) {} }
 const bytes = number => { const units = ['B','KB','MB','GB','TB']; let index = 0; while (number >= 1024 && index < 4) { number /= 1024; index++; } return `${number.toFixed(index ? 1 : 0)} ${units[index]}`; };
