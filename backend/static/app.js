@@ -9,6 +9,7 @@ let kind = 'day';
 let selected = new Date();
 let refreshSeconds = 5;
 let overviewLoadId = 0;
+let spectrumRows = [], spectrumFrequencies = [], lastSpectrumSequence = null, spectrumRowLimit = 120;
 const LIVE_STATUS_INTERVAL_MS = 100;
 
 function toast(message, error = false) {
@@ -48,12 +49,21 @@ async function loadStatus() {
       setText('#live-leq', db(value.leq_db));
       const mixer = value.input_gain?.channels?.length ? value.input_gain.channels.map(level => `${level} %`).join(' - ') : value.input_gain?.percent != null ? `${value.input_gain.percent} %` : 'nicht regelbar';
       setText('#mixer-level', mixer);
+      if (value.spectrum && value.spectrum.sequence !== lastSpectrumSequence) {
+        lastSpectrumSequence = value.spectrum.sequence;
+        spectrumFrequencies = value.spectrum.frequencies;
+        spectrumRowLimit = Math.max(1, Math.round(30 / (value.spectrum.interval_seconds || .25)));
+        spectrumRows.unshift(value.spectrum.levels_db); spectrumRows.length = Math.min(spectrumRows.length, spectrumRowLimit);
+        setText('#dominant-frequency', formatFrequency(value.spectrum.dominant_hz));
+        drawSpectrum();
+      }
       $('#level').hidden = false; $('#microphone-warning').hidden = true;
       $('#connection').textContent = '● Messung aktiv'; $('#connection').className = 'online';
     } else {
       $('#level').innerHTML = '0,0 <small>dB</small>'; $('#level').hidden = true;
       $('#uncalibrated-level').textContent = '–'; $('#live-leq').textContent = '–';
       $('#mixer-level').textContent = '–';
+      if (lastSpectrumSequence !== null || spectrumRows.length) resetSpectrum('Kein Messsignal');
       $('#microphone-warning').hidden = false; $('#connection').textContent = '● Kein Messmikrofon'; $('#connection').className = 'offline';
     }
     $('#recording').hidden = !value.recording;
@@ -74,6 +84,36 @@ function drawHistory(points) {
   const line = (field, color) => { context.strokeStyle = color; context.lineWidth = 2; context.beginPath(); let started = false; points.forEach((point, index) => { if (point[field] == null) return; const xx = left + index / Math.max(points.length - 1, 1) * chartWidth, yy = y(point[field]); started ? context.lineTo(xx, yy) : context.moveTo(xx, yy); started = true; }); context.stroke(); };
   line('db', '#fff'); line('leq_db', '#32e1f2');
   context.fillText(points[0].minute.slice(11, 16), left, height - 5); context.fillText(points.at(-1).minute.slice(11, 16), width - right - 30, height - 5); $('#chart-range').textContent = `${db(Math.min(...values))} – ${db(Math.max(...values))}`;
+}
+function formatFrequency(value) {
+  if (value == null) return '–';
+  return value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1).replace('.', ',')} kHz` : `${Math.round(value)} Hz`;
+}
+function spectrumColor(level) {
+  const stops = [[7,25,39],[12,91,130],[22,188,195],[242,209,75],[239,81,60]], position = Math.max(0, Math.min(1, (level - 20) / 80)) * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(position)), mix = position - index;
+  return `rgb(${stops[index].map((value, channel) => Math.round(value + (stops[index + 1][channel] - value) * mix)).join(',')})`;
+}
+function drawSpectrum(message = null) {
+  const canvas = $('#spectrum-chart'), width = canvas.clientWidth || 480, height = canvas.clientHeight || 142, ratio = devicePixelRatio || 1;
+  canvas.width = width * ratio; canvas.height = height * ratio; const context = canvas.getContext('2d'); context.scale(ratio, ratio);
+  context.fillStyle = '#071925'; context.fillRect(0, 0, width, height);
+  if (message || !spectrumRows.length) {
+    context.fillStyle = '#9fc5d8'; context.font = '12px system-ui'; context.fillText(message || 'Warte auf Messsignal …', 10, height / 2);
+    return;
+  }
+  const axisHeight = 18, plotHeight = height - axisHeight, bandWidth = width / spectrumRows[0].length, rowHeight = plotHeight / spectrumRowLimit;
+  spectrumRows.forEach((levels, row) => levels.forEach((level, band) => { context.fillStyle = spectrumColor(level); context.fillRect(band * bandWidth, row * rowHeight, Math.ceil(bandWidth) + .5, Math.ceil(rowHeight) + .5); }));
+  context.fillStyle = '#071925'; context.fillRect(0, plotHeight, width, axisHeight);
+  context.fillStyle = '#b9d8e6'; context.font = '10px system-ui'; context.textAlign = 'center';
+  [31.5,125,500,2000,8000,16000].forEach(target => {
+    const index = spectrumFrequencies.reduce((best, value, current) => Math.abs(value - target) < Math.abs(spectrumFrequencies[best] - target) ? current : best, 0);
+    const x = Math.max(15, Math.min(width - 18, (index + .5) * bandWidth)); context.fillText(formatFrequency(target), x, height - 4);
+  });
+  canvas.setAttribute('aria-label', `Wasserfall-Frequenzspektrum der letzten 30 Sekunden; dominante Frequenz ${$('#dominant-frequency').textContent}`);
+}
+function resetSpectrum(message = 'Warte auf Messsignal …') {
+  spectrumRows = []; spectrumFrequencies = []; lastSpectrumSequence = null; setText('#dominant-frequency', '–'); drawSpectrum(message);
 }
 function setHistoryLoading(message = 'Wird geladen …') {
   const panel = $('#history-panel'), loading = $('#history-loading'), canvas = $('#history-chart');
@@ -152,5 +192,7 @@ function move(direction) { if (kind === 'day') selected.setDate(selected.getDate
 $('#previous').onclick = () => move(-1); $('#next').onclick = () => move(1);
 
 const savedTheme = localStorage.getItem('noisemeter-theme'); document.body.dataset.theme = savedTheme || 'dark'; $('#theme-toggle').textContent = document.body.dataset.theme === 'dark' ? '☀' : '☾';
+let spectrumResizeTimer; window.addEventListener('resize', () => { clearTimeout(spectrumResizeTimer); spectrumResizeTimer = setTimeout(() => drawSpectrum(), 120); });
+drawSpectrum();
 loadConfig();
 loadEvents(); loadCounts(); loadSystem(); pollStatus(); setInterval(loadSystem, 10000); setInterval(loadCounts, 30000);

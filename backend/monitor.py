@@ -31,6 +31,7 @@ class NoiseMonitor:
         self.samples = queue.Queue(maxsize=64)
         self.current_db, self.last_update, self.running = 0.0, None, False
         self.current_uncalibrated_db, self.current_leq_db = 0.0, None
+        self.current_spectrum, self.spectrum_sequence = None, 0
         self.device_available, self.device_error = False, None
         self.lock = threading.Lock()
         self.thread = None
@@ -66,6 +67,7 @@ class NoiseMonitor:
         self.smoothed_uncalibrated_energy = None
         self.leq_window.clear()
         self.measurement_energy, self.measurement_blocks = 0.0, 0
+        self.current_spectrum = None
 
     def start(self):
         if self.running: return
@@ -108,6 +110,7 @@ class NoiseMonitor:
                     "uncalibrated_db": round(self.current_uncalibrated_db, 1) if self.device_available else None,
                     "leq_db": round(self.current_leq_db, 1) if self.device_available and self.current_leq_db is not None else None,
                     "calibration": self.calibration.metadata(), "input_gain": self.input_gain,
+                    "spectrum": self.current_spectrum,
                     "available": self.device_available, "error": self.device_error,
                     "updated_at": self.last_update,
                     "recording": self.recording is not None, "device": self.config["audio"]["device"]}
@@ -135,7 +138,7 @@ class NoiseMonitor:
     def _levels(self, block):
         weighting = self.config["audio"].get("weighting", "A")
         profile = self.calibration
-        rms, uncalibrated_rms = profile.weighted_rms_pair(block, self.rate, weighting)
+        rms, uncalibrated_rms, frequencies, band_energies, dominant_hz = profile.weighted_analysis(block, self.rate, weighting)
         energy, uncalibrated_energy = rms * rms, uncalibrated_rms * uncalibrated_rms
         time_constant = 0.125 if self.config["audio"].get("time_weighting", "fast") == "fast" else 1.0
         alpha = np.exp(-(len(block) / self.rate) / time_constant)
@@ -146,7 +149,13 @@ class NoiseMonitor:
         db_value = base + manual + 10 * np.log10(max(self.smoothed_energy, 1e-24))
         uncalibrated_db = float(self.config["audio"]["calibration_offset_db"]) + 10 * np.log10(max(self.smoothed_uncalibrated_energy, 1e-24))
         block_leq = base + manual + 10 * np.log10(max(energy, 1e-24))
-        return db_value, uncalibrated_db, block_leq
+        spectrum = {
+            "frequencies": [round(float(value), 1) for value in frequencies],
+            "levels_db": [round(base + manual + 10 * np.log10(max(float(value), 1e-24)), 1) for value in band_energies],
+            "dominant_hz": round(dominant_hz, 1) if dominant_hz is not None else None,
+            "interval_seconds": round(len(block) / self.rate, 3),
+        }
+        return db_value, uncalibrated_db, block_leq, spectrum
 
     def _active_period(self, now):
         current = now.strftime("%H:%M")
@@ -184,14 +193,17 @@ class NoiseMonitor:
         if self.last_retention_check != now.date():
             self._apply_retention(now)
             self.last_retention_check = now.date()
-        db_value, uncalibrated_db, block_leq = self._levels(block)
+        db_value, uncalibrated_db, block_leq, spectrum = self._levels(block)
         block_energy = 10 ** (block_leq / 10)
         self.leq_window.append(block_energy)
         self.measurement_energy += block_energy
         self.measurement_blocks += 1
         live_leq = 10 * np.log10(sum(self.leq_window) / len(self.leq_window))
         with self.lock:
+            self.spectrum_sequence += 1
+            spectrum["sequence"] = self.spectrum_sequence
             self.current_db, self.current_uncalibrated_db, self.current_leq_db = db_value, uncalibrated_db, live_leq
+            self.current_spectrum = spectrum
             self.last_update = now.isoformat(timespec="seconds")
         self.ring.append(block)
         self.energy_ring.append(block_energy)

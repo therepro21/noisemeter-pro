@@ -52,5 +52,16 @@ F [Hz]\tAmpl [dB]\tPhase [deg]
         self.assertAlmostEqual(pair[0], profile.weighted_rms(samples, 48000, "A", True), places=12)
         self.assertAlmostEqual(pair[1], profile.weighted_rms(samples, 48000, "A", False), places=12)
 
+        time_axis = np.arange(12000) / 48000
+        tone = (0.1 * np.sin(2 * np.pi * 1000 * time_axis)).astype(np.float32)[:, None]
+        calibrated, uncalibrated, frequencies, band_energies, dominant = profile.weighted_analysis(tone, 48000, "A")
+        expected_pair = profile.weighted_rms_pair(tone, 48000, "A")
+        self.assertAlmostEqual(calibrated, expected_pair[0], places=12)
+        self.assertAlmostEqual(uncalibrated, expected_pair[1], places=12)
+        self.assertEqual(len(frequencies), 48)
+        self.assertEqual(len(band_energies), 48)
+        self.assertAlmostEqual(dominant, 1000.0, delta=4.0)
+        self.assertAlmostEqual(float(np.sum(band_energies)), calibrated * calibrated, delta=1e-8)
+
 
 if __name__ == "__main__": unittest.main()

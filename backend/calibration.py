@@ -22,6 +22,7 @@ class CalibrationProfile:
         self.title = ""
         self.path = None
         self._gain_cache = {}
+        self._spectrum_layout_cache = {}
 
     @property
     def loaded(self):
@@ -83,6 +84,40 @@ class CalibrationProfile:
         calibrated = self._spectrum_rms(spectrum, self._gain(length, rate, weighting, True), length)
         uncalibrated = self._spectrum_rms(spectrum, self._gain(length, rate, weighting, False), length)
         return calibrated, uncalibrated
+
+    def weighted_analysis(self, samples: np.ndarray, rate: int, weighting: str, band_count: int = 48):
+        """RMS pair plus log-band energies and dominant frequency from the same FFT."""
+        mono = samples[:, 0] if samples.ndim > 1 else samples
+        spectrum = np.fft.rfft(mono)
+        length = len(mono)
+        calibrated_gain = self._gain(length, rate, weighting, True)
+        calibrated = self._spectrum_rms(spectrum, calibrated_gain, length)
+        uncalibrated = self._spectrum_rms(spectrum, self._gain(length, rate, weighting, False), length)
+        frequencies, centers, band_indexes, valid, factors = self._spectrum_layout(length, rate, band_count)
+        bin_energies = np.square(np.abs(spectrum * calibrated_gain), dtype=np.float64) * factors / (length * length)
+        band_energies = np.bincount(band_indexes[valid], weights=bin_energies[valid], minlength=band_count)
+        audible = (frequencies >= 20.0) & (frequencies <= min(20000.0, rate / 2))
+        dominant_hz = float(frequencies[np.argmax(np.where(audible, bin_energies, -1.0))]) if np.any(audible) else None
+        return calibrated, uncalibrated, centers, band_energies, dominant_hz
+
+    def _spectrum_layout(self, length: int, rate: int, band_count: int):
+        key = (length, rate, band_count)
+        cached = self._spectrum_layout_cache.get(key)
+        if cached is not None:
+            return cached
+        frequencies = np.fft.rfftfreq(length, d=1 / rate)
+        upper = min(20000.0, rate / 2)
+        edges = np.geomspace(20.0, upper, band_count + 1)
+        centers = np.sqrt(edges[:-1] * edges[1:])
+        band_indexes = np.searchsorted(edges, frequencies, side="right") - 1
+        valid = (band_indexes >= 0) & (band_indexes < band_count)
+        factors = np.full(len(frequencies), 2.0)
+        factors[0] = 1.0
+        if length % 2 == 0:
+            factors[-1] = 1.0
+        cached = (frequencies, centers, band_indexes, valid, factors)
+        self._spectrum_layout_cache[key] = cached
+        return cached
 
     def _gain(self, length: int, rate: int, weighting: str, calibrated: bool) -> np.ndarray:
         key = (length, rate, weighting.upper(), calibrated)

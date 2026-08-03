@@ -88,6 +88,8 @@ Fachliche Definition: [Svantek - Leq äquivalenter Dauerschallpegel](https://sva
 
 Das responsive Webinterface bietet Tages-, ISO-Wochen-, Monats- und Jahresübersichten. Die drei konfigurierten Tageszeiten enthalten Ereignisanzahl, Minimum, arithmetischen Durchschnitt, Maximum und Leq. Das Dark Theme ist standardmäßig aktiv.
 
+Neben dem aktuellen Pegel zeigt ein CPU-schonender Wasserfall-Spektrumanalysator 48 logarithmische Frequenzbänder von 20 Hz bis 20 kHz über die letzten 30 Sekunden. Die dominante Frequenz bezeichnet die momentan stärkste kalibrierte und A-/C-bewertete Spektralkomponente. Die Analyse verwendet dieselbe FFT wie die Pegelberechnung und erzeugt daher keine zweite Frequenztransformation.
+
 Jeder PDF-Bericht enthält den blau hinterlegten Pegel-/Leq-Verlauf des ausgewählten Zeitraums. PDF-Dateien beginnen mit `NoiseMeterPro`, verwenden Datumsangaben im Format `TT-MM-JJJJ` und führen bei Wochenberichten zusätzlich die Kalenderwoche. Die kompakte Fußleiste des Webinterfaces bleibt dauerhaft sichtbar; ihr belegter Speicherwert umfasst ausschließlich NoiseMeter-Pro-Datenbank, MP3-Aufnahmen, Berichte und Kalibrierdateien.
 
 Fehlmessungen können unter **Einstellungen → Messdaten löschen** vollständig entfernt werden. Dabei werden Messwerte, Ereignisse und zugehörige MP3-Dateien dauerhaft gelöscht.
