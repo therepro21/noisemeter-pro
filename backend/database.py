@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS events (
  duration_seconds REAL NOT NULL, leq_db REAL, dominant_frequency_hz REAL
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
+CREATE TABLE IF NOT EXISTS event_audio (
+ id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, sequence INTEGER NOT NULL,
+ filename TEXT NOT NULL UNIQUE, FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+ UNIQUE(event_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_event_audio_event ON event_audio(event_id, sequence);
 """
 
 class Database:
@@ -39,6 +45,7 @@ class Database:
     def connect(self):
         db = sqlite3.connect(self.path, timeout=15)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA synchronous=NORMAL")
         db.create_aggregate("LEQ", 1, LeqAggregate)
         return db
@@ -63,13 +70,27 @@ class Database:
             db.executemany("INSERT INTO measurements(recorded_at, db, leq_db) VALUES (?, ?, ?)", measurements)
 
     def add_event(self, event: dict):
+        event = dict(event)
+        audio_files = event.pop("audio_files", None) or [event["filename"]]
         with self.connection() as db:
-            db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds, leq_db, dominant_frequency_hz)
+            cursor = db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds, leq_db, dominant_frequency_hz)
                 VALUES (:occurred_at,:peak_db,:threshold_db,:period_name,:filename,:duration_seconds,:leq_db,:dominant_frequency_hz)""", event)
+            db.executemany("INSERT INTO event_audio(event_id, sequence, filename) VALUES (?, ?, ?)",
+                           [(cursor.lastrowid, sequence, filename) for sequence, filename in enumerate(audio_files, 1)])
 
     def events(self, start: str, end: str):
         with self.connection() as db:
-            return [dict(row) for row in db.execute("SELECT * FROM events WHERE occurred_at >= ? AND occurred_at < ? ORDER BY occurred_at DESC", (start, end))]
+            events = [dict(row) for row in db.execute("SELECT * FROM events WHERE occurred_at >= ? AND occurred_at < ? ORDER BY occurred_at DESC", (start, end))]
+            if not events:
+                return events
+            event_ids = [event["id"] for event in events]
+            placeholders = ",".join("?" for _ in event_ids)
+            files = {}
+            for row in db.execute(f"SELECT event_id, filename FROM event_audio WHERE event_id IN ({placeholders}) ORDER BY event_id, sequence", event_ids):
+                files.setdefault(row["event_id"], []).append(row["filename"])
+            for event in events:
+                event["audio_files"] = files.get(event["id"]) or [event["filename"]]
+            return events
 
     def summary(self, start: str, end: str):
         with self.connection() as db:
@@ -167,9 +188,11 @@ class Database:
     def delete_range(self, start: str, end: str):
         """Delete all measurements and events in [start, end), returning audio names."""
         with self.connection() as db:
-            files = [row["filename"] for row in db.execute(
-                "SELECT filename FROM events WHERE occurred_at >= ? AND occurred_at < ?", (start, end)
-            )]
+            files = [row["filename"] for row in db.execute("""
+                SELECT ea.filename FROM event_audio ea JOIN events e ON e.id = ea.event_id
+                WHERE e.occurred_at >= ? AND e.occurred_at < ?
+                UNION SELECT filename FROM events WHERE occurred_at >= ? AND occurred_at < ?
+            """, (start, end, start, end))]
             event_count = db.execute(
                 "SELECT COUNT(*) count FROM events WHERE occurred_at >= ? AND occurred_at < ?", (start, end)
             ).fetchone()["count"]
@@ -182,7 +205,10 @@ class Database:
 
     def remove_events_before(self, timestamp: str):
         with self.connection() as db:
-            files = [row["filename"] for row in db.execute("SELECT filename FROM events WHERE occurred_at < ?", (timestamp,))]
+            files = [row["filename"] for row in db.execute("""
+                SELECT ea.filename FROM event_audio ea JOIN events e ON e.id = ea.event_id WHERE e.occurred_at < ?
+                UNION SELECT filename FROM events WHERE occurred_at < ?
+            """, (timestamp, timestamp))]
             db.execute("DELETE FROM events WHERE occurred_at < ?", (timestamp,))
             return files
 

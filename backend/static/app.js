@@ -126,7 +126,9 @@ function eventRows(events) {
   $('#events').innerHTML = events.length ? events.map(event => {
     const severity = event.peak_db >= event.severe_db ? 'violet' : event.peak_db >= event.warning_db ? 'red' : 'orange';
     const frequency = event.dominant_frequency_hz == null ? '' : `<small class="event-frequency">Dominant: ${formatFrequency(event.dominant_frequency_hz)}</small>`;
-    return `<tr class="event-${severity}"><td>${dateFormat(event.occurred_at)}</td><td>${db(event.peak_db)}${frequency}</td><td>${db(event.leq_db)}</td><td>${db(event.threshold_db)}</td><td>${event.period_name}</td><td><audio controls preload="none" src="/audio/${encodeURI(event.filename)}"></audio></td></tr>`;
+    const duration = `<small class="event-frequency">Ereignisdauer: ${Math.round(event.duration_seconds)} s</small>`;
+    const audio = (event.audio_files?.length ? event.audio_files : [event.filename]).map((filename, index, files) => `<div class="event-audio">${files.length > 1 ? `<small>Teil ${index + 1}/${files.length}</small>` : ''}<audio controls preload="none" src="/audio/${encodeURI(filename)}"></audio></div>`).join('');
+    return `<tr class="event-${severity}"><td>${dateFormat(event.occurred_at)}${duration}</td><td>${db(event.peak_db)}${frequency}</td><td>${db(event.leq_db)}</td><td>${db(event.threshold_db)}</td><td>${event.period_name}</td><td>${audio}</td></tr>`;
   }).join('') : '<tr><td colspan="6">Keine Ereignisse in diesem Zeitraum.</td></tr>';
 }
 function renderPeriodStats(result) {

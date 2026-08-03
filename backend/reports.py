@@ -7,7 +7,6 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
 from reportlab.graphics.shapes import Drawing, Line, PolyLine, Rect, String
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -73,14 +72,14 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
 
     data = site_data or {}
     calibration_status = "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"
-    calibration_content = Paragraph(calibration_status, normal)
+    calibration_content = Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b></font>", normal)
     if calibration_graphic and calibration_graphic.is_file():
-        image_width, image_height = ImageReader(str(calibration_graphic)).getSize()
-        scale = min(3.8 * cm / image_width, 1.35 * cm / image_height)
-        preview = Image(str(calibration_graphic), width=image_width * scale, height=image_height * scale)
+        # The calibration plot intentionally fills the otherwise unused right-hand
+        # side of the data row so its curves and labels remain readable in print.
+        preview = Image(str(calibration_graphic), width=9.8 * cm, height=2.2 * cm)
         calibration_content = Table(
-            [[Paragraph(f"<b>{calibration_status}</b><br/><font size='6.4'>Kalibriergang</font>", normal), preview]],
-            colWidths=[1.8 * cm, 3.9 * cm],
+            [[Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b> - Kalibriergang</font>", normal), preview]],
+            colWidths=[5.3 * cm, 10.0 * cm],
         )
         calibration_content.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -92,7 +91,7 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         ["Zielobjekt", data.get("target_object", ""), "Messmikrofon", data.get("microphone", "")],
         ["Abstand Boden", data.get("ground_distance", ""), "Abstand Wand", data.get("wall_distance", "")],
         ["Mikrofonwinkel", data.get("calibration_angle", ""), "USB-Pegel", data.get("input_gain", "")],
-        ["Kalibrierdatei", data.get("calibration_file", ""), calibration_content, ""],
+        ["Kalibrierdatei", calibration_content, "", ""],
     ]
     details = [[Paragraph(f"<b>{cell}</b>" if index in (0, 2) else str(cell), normal)
                 if isinstance(cell, (str, int, float)) else cell
@@ -100,10 +99,11 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     detail_table = Table(details, colWidths=[3.1 * cm, 5.8 * cm, 3.1 * cm, content_width - 12.0 * cm])
     detail_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), PALE), ("BACKGROUND", (2, 0), (2, -1), PALE),
+        ("BACKGROUND", (1, -1), (3, -1), colors.white),
         ("TEXTCOLOR", (0, 0), (-1, -1), NAVY), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7.8),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8dce7")),
-        ("SPAN", (2, -1), (3, -1)),
+        ("SPAN", (1, -1), (3, -1)),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("PADDING", (0, 0), (-1, -1), 3.5),
     ]))
     story += [detail_table, Spacer(1, 0.24 * cm)]
@@ -185,7 +185,7 @@ def _event_table(events, width):
     rows = [["Bereich", "Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Dauer"]] + [
         [event["period_name"], event["occurred_at"].replace("T", " "),
          Paragraph(f"{event['peak_db']:.1f} dB<br/><font size='5.8'>Dominant: {_frequency(event.get('dominant_frequency_hz'))}</font>", event_style), _db(event.get("leq_db")),
-         f"{event['threshold_db']:.1f} dB", f"{event['duration_seconds']:.1f} s"] for event in events
+         f"{event['threshold_db']:.1f} dB", f"{round(event['duration_seconds'])} s"] for event in events
     ]
     table = Table(rows, repeatRows=1, colWidths=[width * x for x in (0.13, 0.29, 0.14, 0.13, 0.17, 0.14)])
     table.setStyle(_data_table_style())

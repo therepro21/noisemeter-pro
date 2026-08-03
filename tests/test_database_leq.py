@@ -26,13 +26,17 @@ class DatabaseLeqTest(unittest.TestCase):
             ])
             database.add_event({
                 "occurred_at": "2026-08-01T10:00:00", "peak_db": 75.0, "threshold_db": 65.0,
-                "period_name": "Tag", "filename": "event.mp3", "duration_seconds": 8.0,
+                "period_name": "Tag", "filename": "event-part-1.mp3", "audio_files": ["event-part-1.mp3", "event-part-2.mp3"], "duration_seconds": 70.0,
                 "leq_db": 70.0, "dominant_frequency_hz": 80.0,
             })
             with database.connection() as connection:
                 self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0], 3)
                 self.assertEqual(connection.execute("SELECT dominant_frequency_hz FROM events").fetchone()[0], 80.0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM event_audio").fetchone()[0], 2)
+            event = database.events("2026-08-01", "2026-08-02")[0]
+            self.assertEqual(event["duration_seconds"], 70.0)
+            self.assertEqual(event["audio_files"], ["event-part-1.mp3", "event-part-2.mp3"])
             expected = 10 * math.log10((10 ** 5 + 10 ** 7) / 2)
             actual = database.summary("2026-08-01", "2026-08-02")["leq_db"]
             self.assertAlmostEqual(actual, expected)

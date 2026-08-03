@@ -285,16 +285,17 @@ def create_app(config_path: str):
         info.append(["Von", datetime.strptime(start, "%Y-%m-%d").strftime("%d-%m-%Y")])
         info.append(["Bis", (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=1)).strftime("%d-%m-%Y")])
         if kind == "week": info.append(["Kalenderwoche", datetime.strptime(start, "%Y-%m-%d").date().isocalendar().week])
-        sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "Dominante Frequenz Hz", "MP3-Datei"])
+        sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Ereignisdauer Sekunden", "Dominante Frequenz Hz", "MP3-Dateien"])
         for event in events:
-            sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event.get("dominant_frequency_hz"), event["filename"]])
+            sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event.get("dominant_frequency_hz"), " | ".join(event["audio_files"])])
         for column, width in zip("ABCDEFGH", (22, 12, 12, 15, 18, 16, 21, 42)): sheet.column_dimensions[column].width = width
         stream = BytesIO(); workbook.save(stream)
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("ereignisse.xlsx", stream.getvalue())
             for event in events:
-                audio = root / event["filename"]
-                if audio.is_file(): archive.write(audio, f"audio/{event['filename']}")
+                for filename in event["audio_files"]:
+                    audio = root / filename
+                    if audio.is_file(): archive.write(audio, f"audio/{filename}")
         return send_file(output, as_attachment=True, download_name=download_name)
     return app
 

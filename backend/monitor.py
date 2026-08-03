@@ -188,6 +188,9 @@ class NoiseMonitor:
             LOG.exception("Audio monitor stopped due to input error")
             self.running = False
         finally:
+            if self.recording:
+                try: self._finish_recording()
+                except Exception: LOG.exception("Could not finish active event during shutdown")
             self.flush_measurements()
 
     def _process(self, block):
@@ -219,46 +222,84 @@ class NoiseMonitor:
             self.measurement_energy, self.measurement_blocks = 0.0, 0
             self.last_measurement = time.monotonic()
         if self.recording:
-            self.recording["blocks"].append(block)
+            self._write_audio_block(self.recording, block)
             self.recording["peak"] = max(self.recording["peak"], db_value)
-            self.recording["energy"] += block_energy
-            self.recording["energy_blocks"] += 1
-            self.recording["spectrum_energy"] += spectrum_energies
-            self.recording["remaining"] -= 1
+            threshold = float(self.recording["period"]["threshold_db"])
+            if db_value >= threshold:
+                self.recording["energy"] += block_energy
+                self.recording["energy_blocks"] += 1
+                self.recording["spectrum_energy"] += spectrum_energies
+                self.recording["exceedance_samples"] += len(block)
+                self.recording["remaining"] = self.post_blocks
+            else:
+                self.recording["remaining"] -= 1
             if self.recording["remaining"] <= 0: self._finish_recording()
             return
         period = self._active_period(now)
         if period and db_value >= float(period["threshold_db"]):
-            pre_energy = sum(self.energy_ring)
-            pre_spectrum_energy = np.sum(self.spectrum_energy_ring, axis=0)
-            self.recording = {"blocks": list(self.ring), "remaining": self.post_blocks, "peak": db_value,
-                              "energy": pre_energy, "energy_blocks": len(self.energy_ring),
-                              "spectrum_energy": pre_spectrum_energy, "spectrum_frequencies": spectrum_frequencies,
+            self.recording = {"remaining": self.post_blocks, "peak": db_value,
+                              "energy": block_energy, "energy_blocks": 1, "exceedance_samples": len(block),
+                              "spectrum_energy": np.array(spectrum_energies, copy=True), "spectrum_frequencies": spectrum_frequencies,
+                              "audio_files": [], "segment_process": None, "segment_samples": 0, "segment_number": 0,
                               "started": now, "period": period}
+            self._start_audio_segment(self.recording)
+            for buffered_block in self.ring:
+                self._write_audio_block(self.recording, buffered_block)
             LOG.info("Event started: %.1f dB (%s)", db_value, period["name"])
 
     def _finish_recording(self):
         record = self.recording
         self.recording = None
-        started = record["started"]
-        stamp = started.strftime("%Y-%m-%d_%H-%M-%S")
-        safe_db = f"{record['peak']:.1f}dB".replace(".", ",")
-        relative = Path(started.strftime("%Y")) / started.strftime("%m") / f"{stamp}_{safe_db}.mp3"
-        target = Path(self.config["storage"]["audio_dir"]) / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        raw = np.concatenate(record["blocks"], axis=0)
         try:
-            bitrate = int(self.config["audio"].get("mp3_bitrate_kbps", 128))
-            command = ["ffmpeg", "-y", "-f", "f32le", "-ar", str(self.rate), "-ac", str(self.channels), "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(target)]
-            subprocess.run(command, input=raw.astype("float32").tobytes(), check=True, capture_output=True, timeout=30)
-            self.database.add_event({"occurred_at": started.isoformat(timespec="seconds"), "peak_db": record["peak"],
+            self._finish_audio_segment(record)
+            duration = max(1, round(record["exceedance_samples"] / self.rate))
+            self.database.add_event({"occurred_at": record["started"].isoformat(timespec="seconds"), "peak_db": record["peak"],
                 "threshold_db": float(record["period"]["threshold_db"]), "period_name": record["period"]["name"],
-                "filename": relative.as_posix(), "duration_seconds": round(len(raw) / self.rate, 2),
+                "filename": record["audio_files"][0], "audio_files": record["audio_files"], "duration_seconds": duration,
                 "leq_db": 10 * np.log10(record["energy"] / max(record["energy_blocks"], 1)),
                 "dominant_frequency_hz": float(record["spectrum_frequencies"][np.argmax(record["spectrum_energy"])])})
-            LOG.info("Event saved: %s", target)
+            LOG.info("Event saved: %d s exceedance, %d audio segment(s)", duration, len(record["audio_files"]))
         except Exception:
             LOG.exception("Could not encode event audio")
+
+    def _start_audio_segment(self, record):
+        """Open an MP3 encoder for one bounded segment; raw audio is never accumulated in RAM."""
+        record["segment_number"] += 1
+        started = record["started"]
+        stamp = started.strftime("%Y-%m-%d_%H-%M-%S")
+        relative = Path(started.strftime("%Y")) / started.strftime("%m") / f"{stamp}_Teil-{record['segment_number']:03d}.mp3"
+        target = Path(self.config["storage"]["audio_dir"]) / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        bitrate = int(self.config["audio"].get("mp3_bitrate_kbps", 128))
+        command = ["ffmpeg", "-y", "-loglevel", "error", "-f", "f32le", "-ar", str(self.rate), "-ac", str(self.channels),
+                   "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(target)]
+        record["segment_process"] = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        record["segment_samples"] = 0
+        record["audio_files"].append(relative.as_posix())
+
+    def _write_audio_block(self, record, block):
+        maximum = int(float(self.config["audio"].get("max_recording_segment_seconds", 300)) * self.rate)
+        if record["segment_samples"] >= maximum:
+            self._finish_audio_segment(record)
+            self._start_audio_segment(record)
+        record["segment_process"].stdin.write(np.asarray(block, dtype="float32").tobytes())
+        record["segment_samples"] += len(block)
+
+    @staticmethod
+    def _finish_audio_segment(record):
+        process = record.get("segment_process")
+        if process is None:
+            return
+        process.stdin.close()
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        record["segment_process"] = None
+        if process.returncode:
+            raise RuntimeError(f"FFmpeg fehlgeschlagen (Exit-Code {process.returncode})")
 
     def _apply_retention(self, now):
         days = int(self.config["storage"].get("retention_days", 360))

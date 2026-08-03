@@ -98,7 +98,9 @@ Fehlmessungen können unter **Einstellungen → Messdaten löschen** vollständi
 
 Audio liegt in `/var/lib/noisemeter/audio/JJJJ/MM/`, die Datenbank in `/var/lib/noisemeter/noisemeter.sqlite3` und die Konfiguration in `/etc/noisemeter/config.yaml`.
 
-Zur Schonung der microSD-Karte hält NoiseMeter Pro die Sekundenmesswerte der laufenden Minute im RAM und schreibt sie beim Minutenwechsel gesammelt in einer SQLite-Transaktion. Bei einem abrupten Stromausfall können dadurch höchstens die noch nicht geschriebenen Werte der aktuellen Minute fehlen. Ereignis-Audioblöcke werden bereits während der Aufnahme im RAM gehalten; nach Aufnahmeende wird die MP3 einmalig komprimiert auf die Karte geschrieben.
+Zur Schonung der microSD-Karte hält NoiseMeter Pro die Sekundenmesswerte der laufenden Minute im RAM und schreibt sie beim Minutenwechsel gesammelt in einer SQLite-Transaktion. Bei einem abrupten Stromausfall können dadurch höchstens die noch nicht geschriebenen Werte der aktuellen Minute fehlen. Ereignis-Audio wird direkt an FFmpeg gestreamt und nicht als unkomprimiertes Langzeitsignal im RAM gesammelt.
+
+Die angezeigte Ereignisdauer entspricht ausschließlich der auf volle Sekunden gerundeten Zeit oberhalb des konfigurierten Ereignispegels. Vor- und Nachlauf verlängern nur die Audioaufnahme. Eine durchgehende Überschreitung bleibt ein zusammenhängendes Ereignis; dessen Audio wird zur Begrenzung von RAM- und Dateigröße automatisch in höchstens fünf Minuten lange, fortlaufend nummerierte MP3-Teile aufgeteilt.
 
 ## Home Assistant per MQTT
 
