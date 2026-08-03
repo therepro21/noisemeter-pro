@@ -2,19 +2,32 @@
 
 Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Messmikrofon. NoiseMeter Pro misst den aktuellen frequenz- und zeitbewerteten Schallpegel, den energieäquivalenten Dauerschallpegel Leq und zeichnet Grenzwertüberschreitungen als MP3 auf.
 
+> [!IMPORTANT]
+> **Zwingende Systemvoraussetzung: Raspberry Pi OS Bookworm (64-Bit).** Verwende **keine neuere Raspberry-Pi-OS-Version wie Trixie** und keine 32-Bit-Ausgabe. In neueren Versionen fehlen derzeit Bibliotheken beziehungsweise kompatible Pakete, die NoiseMeter Pro und der Installer benötigen. Die im Raspberry Pi Imager zuerst vorgeschlagene aktuelle Version ist deshalb nicht geeignet. Wähle ausdrücklich **Raspberry Pi OS (Legacy, 64-bit)** und kontrolliere, dass die Beschreibung **Debian Bookworm** nennt.
+
 ## Raspberry Pi unter Windows einrichten - Schritt für Schritt
 
 1. Eine geeignete microSD-Karte (mindestens 16 GB) in den Windows-PC einlegen. Alle vorhandenen Daten auf der Karte werden beim Schreiben gelöscht.
 2. [Raspberry Pi Imager](https://www.raspberrypi.com/software/) herunterladen, installieren und starten.
-3. Raspberry-Pi-Modell auswählen.
-4. Als Betriebssystem **Raspberry Pi OS with desktop (64-bit), Bookworm oder neuer** auswählen.
-5. Die microSD-Karte als Ziel auswählen.
-6. In der OS-Anpassung Hostname, Benutzername, ein sicheres Passwort, WLAN und Zeitzone eintragen.
-7. Im Bereich **Raspberry Pi Connect** Connect aktivieren und mit der eigenen Raspberry-Pi-ID verknüpfen. Optional zusätzlich SSH aktivieren.
-8. Betriebssystem schreiben und verifizieren lassen, microSD-Karte sicher entfernen und in den ausgeschalteten Raspberry Pi stecken.
-9. USB-Messmikrofon anschließen, Raspberry Pi mit Strom versorgen und den ersten Start abwarten.
-10. Am Windows-PC [connect.raspberrypi.com](https://connect.raspberrypi.com/) öffnen, anmelden, den Raspberry Pi auswählen und **Remote shell** öffnen.
-11. Diese Befehle vollständig in das Browser-Terminal kopieren:
+3. Im Feld **Raspberry Pi-Gerät wählen / Choose Device** das verwendete Modell auswählen.
+4. **Betriebssystem wählen / Choose OS** öffnen. Nicht die ganz oben angebotene aktuelle Raspberry-Pi-OS-Version auswählen.
+5. In der Betriebssystemliste nach unten zu **Raspberry Pi OS (other) / Raspberry Pi OS (Andere)** scrollen und diesen Eintrag öffnen.
+6. **Raspberry Pi OS (Legacy, 64-bit)** auswählen. Je nach Imager-Version kann der Eintrag zusätzlich **with desktop** enthalten.
+7. Vor dem Fortfahren die Beschreibung unter dem Eintrag kontrollieren. Sie muss sinngemäß **„A port of Debian Bookworm …“** beziehungsweise **„Debian Bookworm mit Sicherheitsupdates“** enthalten. Steht dort **Trixie**, **32-bit** oder **32-Bit**, ist das falsche Image ausgewählt.
+8. Die microSD-Karte über **Speicher wählen / Choose Storage** als Ziel auswählen.
+9. In der OS-Anpassung Hostname, Benutzername, ein sicheres Passwort, WLAN und Zeitzone eintragen.
+10. Im Bereich **Raspberry Pi Connect** Connect aktivieren und mit der eigenen Raspberry-Pi-ID verknüpfen. Optional zusätzlich SSH aktivieren.
+11. Betriebssystem schreiben und verifizieren lassen, microSD-Karte sicher entfernen und in den ausgeschalteten Raspberry Pi stecken.
+12. USB-Messmikrofon anschließen, Raspberry Pi mit Strom versorgen und den ersten Start abwarten.
+13. Am Windows-PC [connect.raspberrypi.com](https://connect.raspberrypi.com/) öffnen, anmelden, den Raspberry Pi auswählen und **Remote shell** öffnen.
+14. Vor der Installation Betriebssystem und Architektur kontrollieren:
+
+```bash
+grep -E '^(PRETTY_NAME|VERSION_CODENAME)=' /etc/os-release
+getconf LONG_BIT
+```
+
+Die Ausgabe muss `bookworm` und `64` enthalten. Erst danach diese Installationsbefehle vollständig in das Browser-Terminal kopieren:
 
 ```bash
 sudo apt update
@@ -24,7 +37,9 @@ cd noisemeter-pro
 sudo bash installer/install.sh
 ```
 
-12. Nach Abschluss `http://<IP-des-Pi>:8090` im Browser öffnen. Die IP wird am Ende der Installation angezeigt. Der Dienst startet zukünftig automatisch. Port 8090 vermeidet typische Konflikte mit weiteren Webanwendungen auf dem Raspberry Pi.
+15. Nach Abschluss `http://<IP-des-Pi>:8090` im Browser öffnen. Die IP wird am Ende der Installation angezeigt. Der Dienst startet zukünftig automatisch. Port 8090 vermeidet typische Konflikte mit weiteren Webanwendungen auf dem Raspberry Pi.
+
+Falls **Raspberry Pi OS (Legacy, 64-bit)** im Imager nicht angeboten wird, den Imager zunächst aktualisieren und die Betriebssystemliste erneut öffnen. Alternativ kann das offizielle Bookworm-64-Bit-Image von der [Raspberry-Pi-OS-Downloadseite](https://www.raspberrypi.com/software/operating-systems/) geladen und im Imager über **Use custom / Eigenes Image** ausgewählt werden. Auch dabei vor der Installation unbedingt Bookworm und 64-Bit kontrollieren.
 
 Status und Protokoll prüfen:
 
