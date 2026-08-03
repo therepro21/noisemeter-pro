@@ -7,6 +7,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
 from reportlab.graphics.shapes import Drawing, Line, PolyLine, Rect, String
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -74,9 +75,12 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     calibration_status = "Kalibriert" if data.get("calibration_file") != "Keine" else "Unkalibriert"
     calibration_content = Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b></font>", normal)
     if calibration_graphic and calibration_graphic.is_file():
-        # The calibration plot intentionally fills the otherwise unused right-hand
-        # side of the data row so its curves and labels remain readable in print.
-        preview = Image(str(calibration_graphic), width=9.8 * cm, height=2.2 * cm)
+        # Embed the original pixels losslessly and scale only the PDF display matrix.
+        # Keeping the source aspect ratio avoids the unreadable vertical compression.
+        source_width, source_height = ImageReader(str(calibration_graphic)).getSize()
+        display_width = 9.8 * cm
+        preview = Image(str(calibration_graphic), width=display_width,
+                        height=display_width * source_height / source_width)
         calibration_content = Table(
             [[Paragraph(f"{data.get('calibration_file', '')}<br/><font size='6.4'><b>{calibration_status}</b> - Kalibriergang</font>", normal), preview]],
             colWidths=[5.3 * cm, 10.0 * cm],
