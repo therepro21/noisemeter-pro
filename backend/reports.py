@@ -13,6 +13,7 @@ from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate
 BLUE = colors.HexColor("#176b9a")
 NAVY = colors.HexColor("#102f49")
 PALE = colors.HexColor("#e9f4fa")
+PERIOD_COLORS = {"Tag": colors.HexColor("#1687b8"), "Abend": colors.HexColor("#d97b29"), "Nacht": colors.HexColor("#6655a5")}
 GERMAN_DAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 GERMAN_MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
 
@@ -33,12 +34,13 @@ def report_subtitle(kind: str, value: str, start: str, end: str) -> str:
 def create_report(path: Path, title: str, kind: str, value: str, start: str, end: str,
                   summary: dict, events: list[dict], site_name: str, site_data: dict | None = None,
                   breakdown: list[dict] | None = None, logo_path: Path | None = None,
-                  calibration_graphic: Path | None = None, history: list[dict] | None = None):
+                  calibration_graphic: Path | None = None, history: list[dict] | None = None,
+                  daily_histories: list[dict] | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=1.25 * cm, rightMargin=1.25 * cm,
         topMargin=1.15 * cm, bottomMargin=1.35 * cm,
-        title=f"{title} – {site_name}", author="NoiseMeter Pro 2.0",
+        title=f"{title} – {site_name}", author="NoiseMeter Pro 3.0",
     )
     content_width = A4[0] - document.leftMargin - document.rightMargin
     styles = getSampleStyleSheet()
@@ -53,12 +55,12 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         canvas.line(doc.leftMargin, 0.85 * cm, A4[0] - doc.rightMargin, 0.85 * cm)
         canvas.setFillColor(colors.HexColor("#607886"))
         canvas.setFont("Helvetica", 7.5)
-        canvas.drawString(doc.leftMargin, 0.48 * cm, "© 2026 Michael P. Thiess · NoiseMeter Pro 2.0")
+        canvas.drawString(doc.leftMargin, 0.48 * cm, "© 2026 Michael P. Thiess · NoiseMeter Pro 3.0")
         canvas.drawRightString(A4[0] - doc.rightMargin, 0.48 * cm, f"Seite {doc.page}")
         canvas.restoreState()
 
     logo = Image(str(logo_path), width=1.25 * cm, height=1.25 * cm) if logo_path and logo_path.is_file() else Spacer(1.25 * cm, 1.25 * cm)
-    heading = [Paragraph("NoiseMeter Pro 2.0", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end)}", header_text)]
+    heading = [Paragraph("NoiseMeter Pro 3.0", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end)}", header_text)]
     header = Table([[logo, heading, Paragraph(f"<b>Messstelle</b><br/>{site_name}", header_text)]],
                    colWidths=[1.55 * cm, content_width - 6.2 * cm, 4.65 * cm])
     header.setStyle(TableStyle([
@@ -102,6 +104,16 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
 
     story += [Paragraph("Pegel- und Leq-Verlauf", section), _level_chart(history or [], content_width)]
 
+    if kind == "week" and daily_histories:
+        story += [Paragraph("Tagesverläufe der Kalenderwoche", section)]
+        day_title = ParagraphStyle("DayChart", parent=normal, fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=NAVY, spaceAfter=3)
+        for day in daily_histories:
+            story.append(KeepTogether([
+                Paragraph(german_date(day["date"]), day_title),
+                _level_chart(day["points"], content_width, 3.25 * cm),
+                Spacer(1, 0.16 * cm),
+            ]))
+
     if breakdown:
         rows = [["Zeitabschnitt", "Maximalpegel", "Durchschnittspegel", "Leq"]] + [
             [item["label"], f"{item['maximum_db']:.1f} dB", f"{item['average_db']:.1f} dB", _db(item.get("leq_db"))] for item in breakdown
@@ -110,24 +122,68 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         table.setStyle(_data_table_style())
         story += [Paragraph("Pegelauswertung", section), table]
 
-    rows = [["Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Tageszeit", "Dauer"]] + [
-        [event["occurred_at"].replace("T", " "), f"{event['peak_db']:.1f} dB", _db(event.get("leq_db")),
-         f"{event['threshold_db']:.1f} dB", event["period_name"], f"{event['duration_seconds']:.1f} s"] for event in events
-    ]
-    if len(rows) == 1:
-        rows.append(["Keine Ereignisse im gewählten Zeitraum", "", "", "", "", ""])
-    events_table = Table(rows, repeatRows=1, colWidths=[content_width * x for x in (0.27, 0.13, 0.13, 0.15, 0.19, 0.13)])
-    events_table.setStyle(_data_table_style())
-    if len(rows) > 1 and events:
-        for index, event in enumerate(events, 1):
-            row_color = colors.HexColor("#f3e4fb") if event["peak_db"] >= event.get("severe_db", event["threshold_db"] + 15) else colors.HexColor("#ffe5e5") if event["peak_db"] >= event.get("warning_db", event["threshold_db"] + 10) else colors.HexColor("#fff0df")
-            events_table.setStyle(TableStyle([("BACKGROUND", (0, index), (-1, index), row_color)]))
-    story += [Paragraph("Ereignisliste", section), events_table]
+    story += [Paragraph("Ereignisliste", section)]
+    story += _event_sections(events, kind, content_width, normal)
     if calibration_graphic and calibration_graphic.is_file():
         graphic = Image(str(calibration_graphic), width=6.2 * cm, height=3.5 * cm)
         graphic.hAlign = "LEFT"
         story += [Paragraph("Kalibriergang", section), graphic, Paragraph("Grafik aus dem hochgeladenen Kalibrierpaket", normal)]
     document.build(story, onFirstPage=footer, onLaterPages=footer)
+
+
+def _event_sections(events, kind, width, normal):
+    if not events:
+        table = Table([["Keine Ereignisse im gewählten Zeitraum"]], colWidths=[width])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f5f9fb")),
+            ("TEXTCOLOR", (0, 0), (-1, -1), NAVY), ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("BOX", (0, 0), (-1, -1), .25, colors.HexColor("#c8dce7")), ("PADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return [table]
+
+    ordered = sorted(events, key=lambda event: event["occurred_at"])
+    groups = []
+    if kind == "day":
+        names = [name for name in ("Tag", "Abend", "Nacht") if any(event["period_name"] == name for event in ordered)]
+        names += sorted({event["period_name"] for event in ordered} - set(names))
+        groups = [(name, [event for event in ordered if event["period_name"] == name]) for name in names]
+    else:
+        dates = sorted({event["occurred_at"][:10] for event in ordered})
+        groups = [(german_date(day), [event for event in ordered if event["occurred_at"].startswith(day)]) for day in dates]
+
+    result = []
+    group_style = ParagraphStyle("EventGroup", parent=normal, fontName="Helvetica-Bold", fontSize=8.6, leading=10.5, textColor=NAVY)
+    for label, items in groups:
+        color = PERIOD_COLORS.get(label, PALE)
+        marker = Table([["", Paragraph(f"{label} · {len(items)} Ereignis{'se' if len(items) != 1 else ''}", group_style)]], colWidths=[0.16 * cm, width - 0.16 * cm])
+        marker.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), color), ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#edf5f9")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (0, 0), 0),
+            ("RIGHTPADDING", (0, 0), (0, 0), 0), ("LEFTPADDING", (1, 0), (1, 0), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        result += [KeepTogether([marker, _event_table(items, width)]), Spacer(1, 0.16 * cm)]
+    return result
+
+
+def _event_table(events, width):
+    rows = [["Bereich", "Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Dauer"]] + [
+        [event["period_name"], event["occurred_at"].replace("T", " "), f"{event['peak_db']:.1f} dB", _db(event.get("leq_db")),
+         f"{event['threshold_db']:.1f} dB", f"{event['duration_seconds']:.1f} s"] for event in events
+    ]
+    table = Table(rows, repeatRows=1, colWidths=[width * x for x in (0.13, 0.29, 0.14, 0.13, 0.17, 0.14)])
+    table.setStyle(_data_table_style())
+    for index, event in enumerate(events, 1):
+        row_color = colors.HexColor("#f3e4fb") if event["peak_db"] >= event.get("severe_db", event["threshold_db"] + 15) else colors.HexColor("#ffe5e5") if event["peak_db"] >= event.get("warning_db", event["threshold_db"] + 10) else colors.HexColor("#fff0df")
+        badge_color = PERIOD_COLORS.get(event["period_name"], BLUE)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, index), (-1, index), row_color),
+            ("BACKGROUND", (0, index), (0, index), badge_color),
+            ("TEXTCOLOR", (0, index), (0, index), colors.white),
+            ("FONTNAME", (0, index), (0, index), "Helvetica-Bold"),
+            ("ALIGN", (0, index), (0, index), "CENTER"),
+        ]))
+    return table
 
 
 def _data_table_style():
@@ -143,9 +199,8 @@ def _db(value):
     return f"{float(value):.1f} dB" if value is not None else "-"
 
 
-def _level_chart(points, width):
+def _level_chart(points, width, height=4.25 * cm):
     """PDF equivalent of the blue web chart: white level curve and cyan Leq curve."""
-    height = 4.25 * cm
     chart = Drawing(width, height)
     chart.add(Rect(0, 0, width, height, rx=7, ry=7, fillColor=BLUE, strokeColor=None))
     values = [float(point[key]) for point in points for key in ("db", "leq_db") if point.get(key) is not None]

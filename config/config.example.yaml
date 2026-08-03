@@ -24,7 +24,7 @@ storage:
   report_dir: /var/lib/noisemeter/reports
 web:
   host: 0.0.0.0
-  port: 8080
+  port: 8090
   secret_key: change-this-secret-key
   refresh_seconds: 5           # Intervall für die Live-Pegel-Aktualisierung
 site_name: Strassenseite

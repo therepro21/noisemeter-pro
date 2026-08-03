@@ -1,4 +1,4 @@
-# NoiseMeter Pro 2.0
+# NoiseMeter Pro 3.0
 
 Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Messmikrofon. NoiseMeter Pro misst den aktuellen frequenz- und zeitbewerteten Schallpegel, den energieäquivalenten Dauerschallpegel Leq und zeichnet Grenzwertüberschreitungen als MP3 auf.
 
@@ -24,7 +24,7 @@ cd noisemeter-pro
 sudo bash installer/install.sh
 ```
 
-12. Nach Abschluss `http://<IP-des-Pi>:8080` im Browser öffnen. Die IP wird am Ende der Installation angezeigt. Der Dienst startet zukünftig automatisch.
+12. Nach Abschluss `http://<IP-des-Pi>:8090` im Browser öffnen. Die IP wird am Ende der Installation angezeigt. Der Dienst startet zukünftig automatisch. Port 8090 vermeidet typische Konflikte mit weiteren Webanwendungen auf dem Raspberry Pi.
 
 Status und Protokoll prüfen:
 

@@ -16,8 +16,12 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --upgrade pip
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 if [[ ! -f /etc/noisemeter/config.yaml ]]; then install -m 660 -o root -g noisemeter "$SOURCE_DIR/config/config.example.yaml" /etc/noisemeter/config.yaml; fi
+if grep -q '^  port: 8080$' /etc/noisemeter/config.yaml; then
+  sed -i 's/^  port: 8080$/  port: 8090/' /etc/noisemeter/config.yaml
+  echo "Bestehenden Standard-Webport von 8080 auf 8090 migriert."
+fi
 install -m 644 "$SOURCE_DIR/systemd/noisemeter.service" /etc/systemd/system/noisemeter.service
 systemctl daemon-reload
 systemctl enable --now noisemeter.service
 IP=$(hostname -I | awk '{print $1}')
-echo "Fertig. Weboberfläche: http://${IP:-raspberrypi.local}:8080"
+echo "Fertig. Weboberfläche: http://${IP:-raspberrypi.local}:8090"

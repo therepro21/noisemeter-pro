@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     "storage": {"audio_dir": "/var/lib/noisemeter/audio", "calibration_dir": "/var/lib/noisemeter/calibration", "retention_days": 360,
                 "database": "/var/lib/noisemeter/noisemeter.sqlite3",
                 "report_dir": "/var/lib/noisemeter/reports"},
-    "web": {"host": "0.0.0.0", "port": 8080, "secret_key": "change-me", "refresh_seconds": 5},
+    "web": {"host": "0.0.0.0", "port": 8090, "secret_key": "change-me", "refresh_seconds": 5},
     "site_name": "Strassenseite",
     "site_data": {"location": "", "orientation": "", "target_object": "", "ground_distance": "", "wall_distance": "", "microphone": "", "microphone_angle": "0"},
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,

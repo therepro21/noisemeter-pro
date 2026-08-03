@@ -102,7 +102,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "2.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "calibration_files", "calibration_angle", "calibration_graphic", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "input_gain": monitor.status()["input_gain"], "calibration": monitor.calibration.metadata(), "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "3.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "calibration_files", "calibration_angle", "calibration_graphic", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "input_gain": monitor.status()["input_gain"], "calibration": monitor.calibration.metadata(), "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -266,7 +266,8 @@ def create_app(config_path: str):
         logo = Path(app.static_folder) / "assets" / "noisemeter-logo.png"
         graphic_name = config["audio"].get("calibration_graphic")
         graphic = Path(config["storage"]["calibration_dir"]) / graphic_name if graphic_name else None
-        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic, database.report_history(kind, start, end))
+        daily_histories = database.daily_histories(start, end) if kind == "week" else None
+        create_report(output, titles[kind], kind, value, start, end, database.summary(start, end), items, config["site_name"], site_data, database.level_breakdown(kind, start, end), logo, graphic, database.report_history(kind, start, end), daily_histories)
         return send_file(output, mimetype="application/pdf", as_attachment=True, download_name=download_name)
     @app.get("/backup/<kind>/<value>.zip")
     def backup(kind, value):

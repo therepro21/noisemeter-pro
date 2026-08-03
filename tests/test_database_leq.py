@@ -25,5 +25,10 @@ class DatabaseLeqTest(unittest.TestCase):
             actual = database.summary("2026-08-01", "2026-08-02")["leq_db"]
             self.assertAlmostEqual(actual, expected)
 
+            histories = database.daily_histories("2026-08-01", "2026-08-04")
+            self.assertEqual([item["date"] for item in histories], ["2026-08-01", "2026-08-02", "2026-08-03"])
+            self.assertEqual(len(histories[0]["points"]), 1)
+            self.assertEqual(histories[1]["points"], [])
+
 
 if __name__ == "__main__": unittest.main()

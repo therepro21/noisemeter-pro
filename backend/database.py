@@ -107,6 +107,20 @@ class Database:
         with self.connection() as db:
             return [dict(row) for row in db.execute(f"SELECT {grouping} label, MAX(db) maximum_db, AVG(db) average_db, LEQ(leq_db) leq_db FROM measurements WHERE recorded_at >= ? AND recorded_at < ? GROUP BY {grouping} ORDER BY label", (start, end))]
 
+    def daily_histories(self, start: str, end: str):
+        """Return one five-minute curve per calendar day, including empty days."""
+        current, stop = date.fromisoformat(start), date.fromisoformat(end)
+        result = []
+        while current < stop:
+            next_day = current + timedelta(days=1)
+            points = self.day_history(current.isoformat(), next_day.isoformat())
+            result.append({
+                "date": current.isoformat(),
+                "points": [{"label": point["minute"], "db": point["db"], "leq_db": point["leq_db"]} for point in points],
+            })
+            current = next_day
+        return result
+
     def period_statistics(self, selected_day: date, periods: list[dict]):
         """Measurement and event statistics for each configured clock-time period."""
         start, end = selected_day.isoformat(), (selected_day + timedelta(days=1)).isoformat()

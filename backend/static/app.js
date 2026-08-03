@@ -29,6 +29,7 @@ function setTitle() {
   $('#title').textContent = ({day:'Tagesübersicht', week:'Wochenübersicht', month:'Monatsübersicht', year:'Jahresübersicht'})[kind];
   $('#count-label').textContent = ({day:'Ereignisse am Tag', week:'Ereignisse der Woche', month:'Ereignisse des Monats', year:'Ereignisse des Jahres'})[kind];
   $('#date').value = localDay(selected); $('#pdf').href = `/report/${kind}/${periodValue()}.pdf`; $('#backup').href = `/backup/${kind}/${periodValue()}.zip`;
+  $('#history-date').textContent = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }).format(selected);
   $('#period-section').hidden = kind !== 'day';
   $$('[data-kind]').forEach(button => button.classList.toggle('active', button.dataset.kind === kind));
 }
