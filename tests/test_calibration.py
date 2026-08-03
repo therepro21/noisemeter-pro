@@ -63,5 +63,12 @@ F [Hz]\tAmpl [dB]\tPhase [deg]
         self.assertAlmostEqual(dominant, 1000.0, delta=4.0)
         self.assertAlmostEqual(float(np.sum(band_energies)), calibrated * calibrated, delta=1e-8)
 
+        response_profile = CalibrationProfile()
+        response_profile.frequencies = np.array([20.0, 80.0, 1000.0])
+        response_profile.corrections = np.array([0.0, 0.4, 0.0])
+        tone_80 = (0.1 * np.sin(2 * np.pi * 80 * time_axis)).astype(np.float32)[:, None]
+        calibrated_80, raw_80 = response_profile.weighted_rms_pair(tone_80, 48000, "A")
+        self.assertAlmostEqual(20 * math.log10(calibrated_80 / raw_80), 0.4, delta=0.01)
+
 
 if __name__ == "__main__": unittest.main()

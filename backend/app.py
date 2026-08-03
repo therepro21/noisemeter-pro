@@ -285,10 +285,10 @@ def create_app(config_path: str):
         info.append(["Von", datetime.strptime(start, "%Y-%m-%d").strftime("%d-%m-%Y")])
         info.append(["Bis", (datetime.strptime(end, "%Y-%m-%d") - timedelta(days=1)).strftime("%d-%m-%Y")])
         if kind == "week": info.append(["Kalenderwoche", datetime.strptime(start, "%Y-%m-%d").date().isocalendar().week])
-        sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "MP3-Datei"])
+        sheet.append(["Zeitpunkt", "Peak dB", "Leq dB", "Grenzwert dB", "Zeitbereich", "Dauer Sekunden", "Dominante Frequenz Hz", "MP3-Datei"])
         for event in events:
-            sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event["filename"]])
-        for column, width in zip("ABCDEFG", (22, 12, 12, 15, 18, 16, 42)): sheet.column_dimensions[column].width = width
+            sheet.append([event["occurred_at"], event["peak_db"], event.get("leq_db"), event["threshold_db"], event["period_name"], event["duration_seconds"], event.get("dominant_frequency_hz"), event["filename"]])
+        for column, width in zip("ABCDEFGH", (22, 12, 12, 15, 18, 16, 21, 42)): sheet.column_dimensions[column].width = width
         stream = BytesIO(); workbook.save(stream)
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("ereignisse.xlsx", stream.getvalue())

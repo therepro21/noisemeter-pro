@@ -28,6 +28,7 @@ class NoiseMonitor:
         self.post_blocks = max(1, round(float(audio["post_roll_seconds"]) * self.rate / self.blocksize))
         self.ring = deque(maxlen=self.pre_blocks)
         self.energy_ring = deque(maxlen=self.pre_blocks)
+        self.spectrum_energy_ring = deque(maxlen=self.pre_blocks)
         self.samples = queue.Queue(maxsize=64)
         self.current_db, self.last_update, self.running = 0.0, None, False
         self.current_uncalibrated_db, self.current_leq_db = 0.0, None
@@ -147,7 +148,8 @@ class NoiseMonitor:
         base = profile.spl_offset(float(self.config["audio"]["calibration_offset_db"]))
         manual = float(self.config["audio"].get("manual_calibration_db", 0))
         db_value = base + manual + 10 * np.log10(max(self.smoothed_energy, 1e-24))
-        uncalibrated_db = float(self.config["audio"]["calibration_offset_db"]) + 10 * np.log10(max(self.smoothed_uncalibrated_energy, 1e-24))
+        # Same absolute sensitivity/manual basis; only the SEN frequency response is omitted.
+        uncalibrated_db = base + manual + 10 * np.log10(max(self.smoothed_uncalibrated_energy, 1e-24))
         block_leq = base + manual + 10 * np.log10(max(energy, 1e-24))
         spectrum = {
             "frequencies": [round(float(value), 1) for value in frequencies],
@@ -155,7 +157,7 @@ class NoiseMonitor:
             "dominant_hz": round(dominant_hz, 1) if dominant_hz is not None else None,
             "interval_seconds": round(len(block) / self.rate, 3),
         }
-        return db_value, uncalibrated_db, block_leq, spectrum
+        return db_value, uncalibrated_db, block_leq, spectrum, frequencies, band_energies
 
     def _active_period(self, now):
         current = now.strftime("%H:%M")
@@ -193,7 +195,7 @@ class NoiseMonitor:
         if self.last_retention_check != now.date():
             self._apply_retention(now)
             self.last_retention_check = now.date()
-        db_value, uncalibrated_db, block_leq, spectrum = self._levels(block)
+        db_value, uncalibrated_db, block_leq, spectrum, spectrum_frequencies, spectrum_energies = self._levels(block)
         block_energy = 10 ** (block_leq / 10)
         self.leq_window.append(block_energy)
         self.measurement_energy += block_energy
@@ -207,6 +209,7 @@ class NoiseMonitor:
             self.last_update = now.isoformat(timespec="seconds")
         self.ring.append(block)
         self.energy_ring.append(block_energy)
+        self.spectrum_energy_ring.append(spectrum_energies)
         if time.monotonic() - self.last_measurement >= 1:
             interval_leq = 10 * np.log10(self.measurement_energy / max(self.measurement_blocks, 1))
             timestamp = now.isoformat(timespec="seconds")
@@ -220,14 +223,17 @@ class NoiseMonitor:
             self.recording["peak"] = max(self.recording["peak"], db_value)
             self.recording["energy"] += block_energy
             self.recording["energy_blocks"] += 1
+            self.recording["spectrum_energy"] += spectrum_energies
             self.recording["remaining"] -= 1
             if self.recording["remaining"] <= 0: self._finish_recording()
             return
         period = self._active_period(now)
         if period and db_value >= float(period["threshold_db"]):
             pre_energy = sum(self.energy_ring)
+            pre_spectrum_energy = np.sum(self.spectrum_energy_ring, axis=0)
             self.recording = {"blocks": list(self.ring), "remaining": self.post_blocks, "peak": db_value,
                               "energy": pre_energy, "energy_blocks": len(self.energy_ring),
+                              "spectrum_energy": pre_spectrum_energy, "spectrum_frequencies": spectrum_frequencies,
                               "started": now, "period": period}
             LOG.info("Event started: %.1f dB (%s)", db_value, period["name"])
 
@@ -248,7 +254,8 @@ class NoiseMonitor:
             self.database.add_event({"occurred_at": started.isoformat(timespec="seconds"), "peak_db": record["peak"],
                 "threshold_db": float(record["period"]["threshold_db"]), "period_name": record["period"]["name"],
                 "filename": relative.as_posix(), "duration_seconds": round(len(raw) / self.rate, 2),
-                "leq_db": 10 * np.log10(record["energy"] / max(record["energy_blocks"], 1))})
+                "leq_db": 10 * np.log10(record["energy"] / max(record["energy_blocks"], 1)),
+                "dominant_frequency_hz": float(record["spectrum_frequencies"][np.argmax(record["spectrum_energy"])])})
             LOG.info("Event saved: %s", target)
         except Exception:
             LOG.exception("Could not encode event audio")

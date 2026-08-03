@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_measurements_time ON measurements(recorded_at);
 CREATE TABLE IF NOT EXISTS events (
  id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL, peak_db REAL NOT NULL,
  threshold_db REAL NOT NULL, period_name TEXT NOT NULL, filename TEXT NOT NULL UNIQUE,
- duration_seconds REAL NOT NULL, leq_db REAL
+ duration_seconds REAL NOT NULL, leq_db REAL, dominant_frequency_hz REAL
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
@@ -29,6 +29,7 @@ class Database:
             db.executescript(SCHEMA)
             self._add_column(db, "measurements", "leq_db", "REAL")
             self._add_column(db, "events", "leq_db", "REAL")
+            self._add_column(db, "events", "dominant_frequency_hz", "REAL")
 
     @staticmethod
     def _add_column(db, table, column, definition):
@@ -63,8 +64,8 @@ class Database:
 
     def add_event(self, event: dict):
         with self.connection() as db:
-            db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds, leq_db)
-                VALUES (:occurred_at,:peak_db,:threshold_db,:period_name,:filename,:duration_seconds,:leq_db)""", event)
+            db.execute("""INSERT INTO events(occurred_at, peak_db, threshold_db, period_name, filename, duration_seconds, leq_db, dominant_frequency_hz)
+                VALUES (:occurred_at,:peak_db,:threshold_db,:period_name,:filename,:duration_seconds,:leq_db,:dominant_frequency_hz)""", event)
 
     def events(self, start: str, end: str):
         with self.connection() as db:

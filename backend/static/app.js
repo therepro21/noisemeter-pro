@@ -125,7 +125,8 @@ const dateFormat = value => new Intl.DateTimeFormat('de-DE', {weekday:'long', da
 function eventRows(events) {
   $('#events').innerHTML = events.length ? events.map(event => {
     const severity = event.peak_db >= event.severe_db ? 'violet' : event.peak_db >= event.warning_db ? 'red' : 'orange';
-    return `<tr class="event-${severity}"><td>${dateFormat(event.occurred_at)}</td><td>${db(event.peak_db)}</td><td>${db(event.leq_db)}</td><td>${db(event.threshold_db)}</td><td>${event.period_name}</td><td><audio controls preload="none" src="/audio/${encodeURI(event.filename)}"></audio></td></tr>`;
+    const frequency = event.dominant_frequency_hz == null ? '' : `<small class="event-frequency">Dominant: ${formatFrequency(event.dominant_frequency_hz)}</small>`;
+    return `<tr class="event-${severity}"><td>${dateFormat(event.occurred_at)}</td><td>${db(event.peak_db)}${frequency}</td><td>${db(event.leq_db)}</td><td>${db(event.threshold_db)}</td><td>${event.period_name}</td><td><audio controls preload="none" src="/audio/${encodeURI(event.filename)}"></audio></td></tr>`;
   }).join('') : '<tr><td colspan="6">Keine Ereignisse in diesem Zeitraum.</td></tr>';
 }
 function renderPeriodStats(result) {

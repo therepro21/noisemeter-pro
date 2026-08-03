@@ -167,8 +167,10 @@ def _event_sections(events, kind, width, normal):
 
 
 def _event_table(events, width):
+    event_style = ParagraphStyle("EventPeak", fontName="Helvetica", fontSize=7.2, leading=8.2, textColor=NAVY)
     rows = [["Bereich", "Zeitpunkt", "Spitze", "Leq", "Grenzwert", "Dauer"]] + [
-        [event["period_name"], event["occurred_at"].replace("T", " "), f"{event['peak_db']:.1f} dB", _db(event.get("leq_db")),
+        [event["period_name"], event["occurred_at"].replace("T", " "),
+         Paragraph(f"{event['peak_db']:.1f} dB<br/><font size='5.8'>Dominant: {_frequency(event.get('dominant_frequency_hz'))}</font>", event_style), _db(event.get("leq_db")),
          f"{event['threshold_db']:.1f} dB", f"{event['duration_seconds']:.1f} s"] for event in events
     ]
     table = Table(rows, repeatRows=1, colWidths=[width * x for x in (0.13, 0.29, 0.14, 0.13, 0.17, 0.14)])
@@ -197,6 +199,13 @@ def _data_table_style():
 
 def _db(value):
     return f"{float(value):.1f} dB" if value is not None else "-"
+
+
+def _frequency(value):
+    if value is None:
+        return "-"
+    frequency = float(value)
+    return f"{frequency / 1000:.1f} kHz" if frequency >= 1000 else f"{frequency:.0f} Hz"
 
 
 def _level_chart(points, width, height=4.25 * cm):
