@@ -34,6 +34,12 @@ mqtt:
   port: 1883
   username: ""
   password: ""
+  client_id: noisemeter-pro
+  keepalive: 60
+  qos: 0
+  retain: true
+  tls_enabled: false
+  tls_ca_file: ""
   discovery_prefix: homeassistant
   base_topic: noisemeter
 # At least one enabled time window can be active. Windows may cross midnight.

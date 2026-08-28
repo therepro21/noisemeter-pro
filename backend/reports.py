@@ -51,7 +51,7 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
     document = SimpleDocTemplate(
         str(path), pagesize=A4, leftMargin=1.25 * cm, rightMargin=1.25 * cm,
         topMargin=1.15 * cm, bottomMargin=1.35 * cm,
-        title=f"{title} – {site_name}", author="NoiseMeter Pro 3.0",
+        title=f"{title} – {site_name}", author="NoiseMeter Pro 3.1",
     )
     content_width = A4[0] - document.leftMargin - document.rightMargin
     styles = getSampleStyleSheet()
@@ -66,12 +66,12 @@ def create_report(path: Path, title: str, kind: str, value: str, start: str, end
         canvas.line(doc.leftMargin, 0.85 * cm, A4[0] - doc.rightMargin, 0.85 * cm)
         canvas.setFillColor(colors.HexColor("#607886"))
         canvas.setFont("Helvetica", 7.5)
-        canvas.drawString(doc.leftMargin, 0.48 * cm, "© 2026 Michael P. Thiess · NoiseMeter Pro 3.0")
+        canvas.drawString(doc.leftMargin, 0.48 * cm, "© 2026 Michael P. Thiess · NoiseMeter Pro 3.1")
         canvas.drawRightString(A4[0] - doc.rightMargin, 0.48 * cm, f"{tr(language, 'Seite', 'Page')} {doc.page}")
         canvas.restoreState()
 
     logo = Image(str(logo_path), width=1.25 * cm, height=1.25 * cm) if logo_path and logo_path.is_file() else Spacer(1.25 * cm, 1.25 * cm)
-    heading = [Paragraph("NoiseMeter Pro 3.0", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end, language)}", header_text)]
+    heading = [Paragraph("NoiseMeter Pro 3.1", header_title), Paragraph(f"{title} {report_subtitle(kind, value, start, end, language)}", header_text)]
     header = Table([[logo, heading, Paragraph(f"<b>{tr(language, 'Messstelle', 'Measurement site')}</b><br/>{site_name}", header_text)]],
                    colWidths=[1.55 * cm, content_width - 6.2 * cm, 4.65 * cm])
     header.setStyle(TableStyle([

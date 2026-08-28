@@ -65,10 +65,19 @@ F [Hz]\tAmpl [dB]\tPhase [deg]
 
         response_profile = CalibrationProfile()
         response_profile.frequencies = np.array([20.0, 80.0, 1000.0])
-        response_profile.corrections = np.array([0.0, 0.4, 0.0])
+        response_profile.corrections = np.array([0.0, -0.4, 0.0])
         tone_80 = (0.1 * np.sin(2 * np.pi * 80 * time_axis)).astype(np.float32)[:, None]
         calibrated_80, raw_80 = response_profile.weighted_rms_pair(tone_80, 48000, "A")
-        self.assertAlmostEqual(20 * math.log10(calibrated_80 / raw_80), 0.4, delta=0.01)
+        self.assertAlmostEqual(20 * math.log10(calibrated_80 / raw_80), -0.4, delta=0.01)
+
+    def test_all_file_formats_subtract_deviation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for suffix in (".sen", ".txt", ".csv", ".cal"):
+                path = Path(temporary) / f"profile{suffix}"
+                header = "F [Hz]\tAmpl [dB]\tPhase [deg]\n" if suffix == ".sen" else "# frequency response\n"
+                path.write_text(header + "20 0\n80 0.4\n1000 -0.4\n", encoding="utf-8")
+                profile = CalibrationProfile(); profile.load(str(path))
+                self.assertEqual(profile.corrections.tolist(), [-0.0, -0.4, 0.4])
 
 
 if __name__ == "__main__": unittest.main()

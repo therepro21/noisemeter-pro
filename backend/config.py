@@ -18,7 +18,9 @@ DEFAULT_CONFIG = {
     "site_name": "Strassenseite",
     "site_data": {"location": "", "orientation": "", "target_object": "", "ground_distance": "", "wall_distance": "", "microphone": "", "microphone_angle": "0"},
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
-             "username": "", "password": "", "discovery_prefix": "homeassistant",
+             "username": "", "password": "", "client_id": "noisemeter-pro",
+             "keepalive": 60, "qos": 0, "retain": True, "tls_enabled": False,
+             "tls_ca_file": "", "discovery_prefix": "homeassistant",
              "base_topic": "noisemeter"},
     "periods": []
 }

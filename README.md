@@ -1,4 +1,4 @@
-# NoiseMeter Pro 3.0
+# NoiseMeter Pro 3.1
 
 [Deutsch](README.md) | [English](README.en.md)
 
@@ -112,4 +112,10 @@ Die angezeigte Ereignisdauer entspricht ausschließlich der auf volle Sekunden g
 
 ## Home Assistant per MQTT
 
-MQTT ist standardmäßig deaktiviert und kann im Webinterface konfiguriert werden. Veröffentlicht werden aktueller Schallpegel, aktueller Leq sowie Tages-, Wochen- und Monatshöchstwert.
+MQTT ist standardmäßig deaktiviert und kann im Webinterface konfiguriert werden. Für Mosquitto/Home Assistant stehen Broker, Port, Client-ID, Benutzername/Passwort, Keepalive, QoS, Retain, TLS, CA-Zertifikat, Discovery-Präfix und Basistopic bereit. Home Assistant Discovery veröffentlicht aktuellen Schallpegel, aktuellen Leq sowie Tages-, Wochen- und Monatshöchstwert einschließlich Verfügbarkeitsstatus.
+
+## Kalibrierkorrektur und Updates
+
+Der Frequenzwert aus jeder unterstützten Kalibrierdatei wird von der Messung abgezogen. Ein Eintrag `+0,4 dB` bewirkt daher `-0,4 dB` Korrektur; ein Eintrag `-0,4 dB` bewirkt rechnerisch `+0,4 dB`. Die Punkte werden logarithmisch auf die vorhandenen FFT-Frequenzbins interpoliert. FFT, A/C-Bewertung, Kalibrierung und Spektrumanalyse werden gemeinsam berechnet und gecacht, sodass keine zusätzliche Equalizer-FFT erforderlich ist.
+
+Unter **Einstellungen → Software-Update** prüft NoiseMeter Pro das neueste GitHub-Release. Ein Update wird nur nach ausdrücklichem Klick angefordert und von einem eng begrenzten root-eigenen systemd-Dienst aus dem fest hinterlegten Repository `therepro21/noisemeter-pro` installiert. Ein automatisches, unbeaufsichtigtes Update bei jedem Start ist bewusst nicht aktiv.

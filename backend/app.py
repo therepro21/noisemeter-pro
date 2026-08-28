@@ -8,6 +8,8 @@ import signal
 import zipfile
 import shutil
 import tempfile
+import json
+import urllib.request
 from io import BytesIO
 
 from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
@@ -19,6 +21,8 @@ from .monitor import NoiseMonitor
 from .mqtt import MqttPublisher
 from .reports import create_report
 from .system_info import SystemInfo
+
+VERSION = "3.1.0"
 
 def period_range(kind: str, value: str):
     if kind == "day":
@@ -52,6 +56,9 @@ def backup_filename(kind: str, start: str, end: str) -> str:
     period = pdf_name.split("_", 2)[2].rsplit(".", 1)[0]
     return f"NoiseMeterPro_Backup_{period}.zip"
 
+def _version_tuple(value: str):
+    return tuple(int(part) for part in value.split(".")[:3] if part.isdigit())
+
 def create_app(config_path: str):
     config = load_config(config_path)
     app = Flask(__name__); app.config["SECRET_KEY"] = config["web"]["secret_key"]
@@ -68,6 +75,34 @@ def create_app(config_path: str):
     def status(): return jsonify(monitor.status())
     @app.get("/api/system")
     def system_status(): return jsonify(system_info.read())
+    @app.get("/api/update")
+    def update_status():
+        result = {"current_version": VERSION, "latest_version": None, "update_available": False, "state": "idle"}
+        status_file = Path("/var/lib/noisemeter/update-status.json")
+        if status_file.is_file():
+            try: result.update(json.loads(status_file.read_text(encoding="utf-8")))
+            except (OSError, ValueError): pass
+        try:
+            latest_request = urllib.request.Request("https://api.github.com/repos/therepro21/noisemeter-pro/releases/latest", headers={"Accept": "application/vnd.github+json", "User-Agent": "NoiseMeter-Pro"})
+            with urllib.request.urlopen(latest_request, timeout=3) as response:
+                latest = json.load(response).get("tag_name", "").lstrip("v")
+            result["latest_version"] = latest or None
+            result["update_available"] = bool(latest and _version_tuple(latest) > _version_tuple(VERSION))
+        except Exception as error:
+            result["check_error"] = str(error)
+        return jsonify(result)
+    @app.post("/api/update")
+    def request_update():
+        # A custom same-origin header prevents a third-party website from
+        # triggering this privileged action through a plain cross-site POST.
+        if request.headers.get("X-NoiseMeter-Update") != "confirm":
+            abort(403)
+        try:
+            Path("/var/lib/noisemeter/update.request").write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+        except OSError as error:
+            logging.exception("Could not request update")
+            return jsonify({"ok": False, "error": str(error)}), 503
+        return jsonify({"ok": True, "state": "requested"}), 202
     @app.get("/api/event-counts")
     def event_counts():
         today = date.today(); week = today - timedelta(days=today.weekday()); month = today.replace(day=1); year = today.replace(month=1, day=1)
@@ -104,7 +139,7 @@ def create_app(config_path: str):
     @app.get("/audio/<path:filename>")
     def audio(filename): return send_from_directory(config["storage"]["audio_dir"], filename, conditional=True)
     @app.get("/api/config")
-    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "3.0.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "calibration_files", "calibration_angle", "calibration_graphic", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "input_gain": monitor.status()["input_gain"], "calibration": monitor.calibration.metadata(), "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {"enabled": config["mqtt"]["enabled"], "host": config["mqtt"]["host"], "port": config["mqtt"]["port"], "username": config["mqtt"]["username"], "discovery_prefix": config["mqtt"]["discovery_prefix"], "base_topic": config["mqtt"]["base_topic"], "has_password": bool(config["mqtt"].get("password"))}})
+    def get_config(): return jsonify({"site_name": config["site_name"], "site_data": config.get("site_data", {}), "version": "3.1.0", "web": {"refresh_seconds": config["web"].get("refresh_seconds", 5)}, "periods": config["periods"], "audio": {k: config["audio"].get(k) for k in ("calibration_offset_db", "device", "microphone_name", "mp3_bitrate_kbps", "calibration_file", "calibration_files", "calibration_angle", "calibration_graphic", "manual_calibration_db", "weighting", "time_weighting", "pre_roll_seconds", "post_roll_seconds")}, "input_gain": monitor.status()["input_gain"], "calibration": monitor.calibration.metadata(), "storage": {"retention_days": config["storage"]["retention_days"]}, "mqtt": {**{k: config["mqtt"].get(k) for k in ("enabled", "host", "port", "username", "client_id", "keepalive", "qos", "retain", "tls_enabled", "tls_ca_file", "discovery_prefix", "base_topic")}, "has_password": bool(config["mqtt"].get("password")), "connected": app.extensions["mqtt"].connected}})
     @app.get("/api/audio-devices")
     def audio_devices():
         try:
@@ -238,9 +273,9 @@ def create_app(config_path: str):
     def set_mqtt():
         payload = request.get_json(force=True) or {}
         try:
-            settings = {"enabled": bool(payload.get("enabled", False)), "host": str(payload["host"]).strip(), "port": int(payload["port"]), "username": str(payload.get("username", "")), "discovery_prefix": str(payload.get("discovery_prefix", "homeassistant")).strip("/"), "base_topic": str(payload.get("base_topic", "noisemeter")).strip("/")}
+            settings = {"enabled": bool(payload.get("enabled", False)), "host": str(payload["host"]).strip(), "port": int(payload["port"]), "username": str(payload.get("username", "")), "client_id": str(payload.get("client_id", "noisemeter-pro")).strip(), "keepalive": int(payload.get("keepalive", 60)), "qos": int(payload.get("qos", 0)), "retain": bool(payload.get("retain", True)), "tls_enabled": bool(payload.get("tls_enabled", False)), "tls_ca_file": str(payload.get("tls_ca_file", "")).strip(), "discovery_prefix": str(payload.get("discovery_prefix", "homeassistant")).strip("/"), "base_topic": str(payload.get("base_topic", "noisemeter")).strip("/")}
         except (KeyError, TypeError, ValueError): abort(400, "Ungültige MQTT-Einstellungen")
-        if not settings["host"] or not 1 <= settings["port"] <= 65535 or not settings["base_topic"]: abort(400, "Ungültige MQTT-Einstellungen")
+        if not settings["host"] or not settings["client_id"] or not settings["base_topic"] or not 1 <= settings["port"] <= 65535 or not 10 <= settings["keepalive"] <= 3600 or settings["qos"] not in (0, 1, 2): abort(400, "Ungültige MQTT-Einstellungen")
         password = payload.get("password")
         settings["password"] = config["mqtt"].get("password", "") if password in (None, "") else str(password)
         app.extensions["mqtt"].stop()

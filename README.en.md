@@ -1,4 +1,4 @@
-# NoiseMeter Pro 3.0
+# NoiseMeter Pro 3.1
 
 [Deutsch](README.md) | [English](README.en.md)
 
@@ -70,4 +70,10 @@ PDF reports include the measurement-site data, USB input level, calibration file
 
 ## MQTT / Home Assistant
 
-MQTT is disabled by default and can be configured in the web interface. NoiseMeter Pro publishes current sound level, current Leq and daily, weekly and monthly peak values.
+MQTT is disabled by default. Mosquitto/Home Assistant settings include broker, port, client ID, credentials, keepalive, QoS, retain, TLS, CA certificate, discovery prefix and base topic. Discovery entities include availability status.
+
+## Calibration correction and updates
+
+Every calibration-file value is subtracted from the measurement. Therefore `+0.4 dB` applies `-0.4 dB`, while `-0.4 dB` applies `+0.4 dB`. Points are interpolated logarithmically onto cached FFT bins; calibration, A/C weighting and spectrum analysis share the same FFT.
+
+**Settings → Software update** checks the latest GitHub release. Installation starts only after an explicit click and is performed by a narrowly scoped root-owned systemd service from the fixed `therepro21/noisemeter-pro` repository. Unattended updates at every boot are intentionally disabled.

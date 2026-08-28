@@ -59,8 +59,10 @@ class CalibrationProfile:
             if in_frequency_table and len(values) >= 2:
                 frequency, response = float(values[0]), float(values[1])
                 if 1 <= frequency <= 96000 and -60 <= response <= 60:
-                    # SEN stores microphone response relative to 1 kHz; compensation is its inverse.
-                    correction = -response if sen_format else response
+                    # Every supported calibration file describes the measured
+                    # microphone deviation. Compensation is measurement minus
+                    # file value: +0.4 dB becomes -0.4 dB, -0.4 dB becomes +0.4 dB.
+                    correction = -response
                     pairs.append((frequency, correction))
         if len(pairs) >= 2:
             pairs.sort(key=lambda item: item[0])
