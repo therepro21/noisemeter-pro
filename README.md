@@ -8,6 +8,16 @@
 
 Lärmüberwachung für Raspberry Pi 3B+, 4 und 5 mit USB-Messmikrofon. NoiseMeter Pro misst den aktuellen frequenz- und zeitbewerteten Schallpegel, den energieäquivalenten Dauerschallpegel Leq und zeichnet Grenzwertüberschreitungen als MP3 auf.
 
+## Webinterface und Standardport
+
+NoiseMeter Pro verwendet standardmäßig den **TCP-Port 8090**. Das Webinterface ist nach der Installation unter folgender Adresse erreichbar:
+
+```text
+http://<IP-Adresse-des-Raspberry-Pi>:8090
+```
+
+Beispiel: `http://192.168.1.193:8090`. Der Port steht in `/etc/noisemeter/config.yaml` unter `web: → port:`. Nach einer Änderung muss der Dienst mit `sudo systemctl restart noisemeter` neu gestartet werden.
+
 > [!IMPORTANT]
 > **Zwingende Systemvoraussetzung: Raspberry Pi OS Bookworm (64-Bit).** Verwende **keine neuere Raspberry-Pi-OS-Version wie Trixie** und keine 32-Bit-Ausgabe. In neueren Versionen fehlen derzeit Bibliotheken beziehungsweise kompatible Pakete, die NoiseMeter Pro und der Installer benötigen. Die im Raspberry Pi Imager zuerst vorgeschlagene aktuelle Version ist deshalb nicht geeignet. Wähle ausdrücklich **Raspberry Pi OS (Legacy, 64-bit)** und kontrolliere, dass die Beschreibung **Debian Bookworm** nennt.
 

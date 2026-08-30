@@ -8,6 +8,16 @@
 
 NoiseMeter Pro is a Raspberry Pi noise-monitoring application for calibrated USB measurement microphones. It provides live A/C-weighted sound levels, Leq, a frequency-spectrum waterfall, configurable day/evening/night thresholds, MP3 event recording, long-term histories, PDF reports and XLSX/ZIP backups.
 
+## Web interface and default port
+
+NoiseMeter Pro uses **TCP port 8090** by default. After installation, open:
+
+```text
+http://<RASPBERRY-PI-IP>:8090
+```
+
+Example: `http://192.168.1.193:8090`. The port is configured in `/etc/noisemeter/config.yaml` under `web: → port:`. After changing it, restart the service with `sudo systemctl restart noisemeter`.
+
 > [!IMPORTANT]
 > **Required operating system: Raspberry Pi OS Bookworm (64-bit).** Do not use a newer release such as Trixie or a 32-bit image. In Raspberry Pi Imager choose **Raspberry Pi OS (other)**, then **Raspberry Pi OS (Legacy, 64-bit)**, and verify that its description explicitly mentions **Debian Bookworm**.
 
